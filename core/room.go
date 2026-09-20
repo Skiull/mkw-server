@@ -139,12 +139,6 @@ func broadcastLoop() {
 			sender.isRacer = true
 		}
 
-		_, err := parseRacePacket(data)
-		if err != nil {
-			logging.Log("Aid %d sent invalid Race packet! Reason: %v.", sender.aid, err)
-			continue
-		}
-
 		aidBitmap := binary.BigEndian.Uint16(data[2:4])
 		receivingAids := util.GetSendToAids(aidBitmap)
 
