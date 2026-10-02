@@ -28,6 +28,9 @@ type Aid struct {
 
 	// Distinguishes racers from non-racers. This is important for the countdown.
 	isRacer bool
+
+	sentRacePackets [maxRaceFrames][]byte
+	raceFrames [maxRaceFrames]RaceFrameData
 }
 
 var aids map[string]*Aid = make(map[string]*Aid)

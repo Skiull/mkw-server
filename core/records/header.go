@@ -127,3 +127,7 @@ func (h *Header) RaceModeLen() byte {
 func (h *Header) RoomSelectLen() byte {
 	return h.roomSelectLen
 }
+
+func (h *Header) UserLen() byte {
+	return h.userLen
+}

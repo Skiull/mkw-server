@@ -33,7 +33,7 @@ var room *Room
 
 func InitRoom(roomAddr *net.UDPAddr) error {
 	room = &Room{
-		addr:    roomAddr,
+		addr: roomAddr,
 		// 256 came out of nowhere, needs to be tested
 		broadcast: make(chan Packet, 256),
 	}
@@ -85,7 +85,7 @@ func readLoop() {
 
 		pkt := Packet{
 			sender:       addr,
-			aid:       a,
+			aid:          a,
 			data:         append([]byte{}, buf[:n]...),
 			receivedTime: time.Now(),
 		}
@@ -113,8 +113,22 @@ func handlePacket(pkt *Packet) {
 		return
 	}
 
-	if data[0] == RacePacketMagic {
+	if isRaceFramePacket(binary.BigEndian.Uint16(data[:2])) {
+		err := handleRaceFrame(a, data)
+		if err != nil {
+			logging.Log("aid %d handleRaceFrame err %v", a.aid, err)
+		}
+		return
+	}
+
+	if isRacePacket(data) {
+		err := handleRacePacket(a, data)
+		if err != nil {
+			logging.Log("aid %d handleRacePacket() failed: %v", a.aid, err)
+			return
+		}
 		room.broadcast <- *pkt
+		return
 	}
 }
 

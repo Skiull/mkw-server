@@ -10,7 +10,7 @@ import (
 const RaceInfoLen = 0x28
 
 type RaceInfo struct {
-	countdownElapsedTime      uint32
+	time                      uint32
 	raceSeed                  uint32
 	gameModeInfo              common.GameModeInfo
 	lagFrames                 uint16
@@ -25,10 +25,11 @@ type RaceInfo struct {
 	playerType                common.PlayerType
 	playerIdToAidMap          [12]byte
 	engineClass               common.EngineClass
+	startedRace               bool // added, was padding.
 }
 
 func ParseRaceInfo(data []byte) (*RaceInfo, error) {
-	countdownElapsedTime := binary.BigEndian.Uint32(data[:0x4])
+	time := binary.BigEndian.Uint32(data[:0x4])
 	raceSeed := binary.BigEndian.Uint32(data[0x4:0x8])
 
 	gameModeInfoRaw := binary.BigEndian.Uint32(data[0x8:0xc])
@@ -92,8 +93,10 @@ func ParseRaceInfo(data []byte) (*RaceInfo, error) {
 		return nil, fmt.Errorf("invalid engineClass (%d)", engineClass)
 	}
 
+	startedRace := data[0x25] != 0
+
 	return &RaceInfo{
-		countdownElapsedTime:      countdownElapsedTime,
+		time:                      time,
 		raceSeed:                  raceSeed,
 		gameModeInfo:              gameModeInfo,
 		lagFrames:                 lagFrames,
@@ -108,5 +111,14 @@ func ParseRaceInfo(data []byte) (*RaceInfo, error) {
 		playerType:                playerType,
 		playerIdToAidMap:          playerIdToAidMap,
 		engineClass:               engineClass,
+		startedRace:               startedRace,
 	}, nil
+}
+
+func (r *RaceInfo) Time() uint32 {
+	return r.time
+}
+
+func (r *RaceInfo) StartedRace() bool {
+	return r.startedRace
 }
