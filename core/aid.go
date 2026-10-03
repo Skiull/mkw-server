@@ -16,7 +16,9 @@ type Aid struct {
 
 	aid      byte
 	hasGuest bool
-	players []*Player
+	players  []*Player
+	// Time (in frames) the race results came up. Reset before the start of the next race.
+	raceFinishTime uint16
 
 	readyForCountdown bool
 
@@ -30,7 +32,7 @@ type Aid struct {
 	isRacer bool
 
 	sentRacePackets [maxRaceFrames][]byte
-	raceFrames [maxRaceFrames]RaceFrameData
+	raceFrames      [maxRaceFrames]RaceFrameData
 }
 
 var aids map[string]*Aid = make(map[string]*Aid)

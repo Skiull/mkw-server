@@ -27,6 +27,9 @@ type Room struct {
 	// Indicates if the countdown can start. Set when all aids are ready and reset when
 	// all aids started the countdown.
 	countdownState bool
+
+	// Flag for if everyone in the room has finished the current race.
+	everyoneFinishedRace bool
 }
 
 var room *Room
@@ -117,6 +120,14 @@ func handlePacket(pkt *Packet) {
 		err := handleRaceFrame(a, data)
 		if err != nil {
 			logging.Log("aid %d handleRaceFrame err %v", a.aid, err)
+		}
+		return
+	}
+
+	if isFinishTimePacket(data) {
+		err := handleFinishTimePacket(a, data)
+		if err != nil {
+			logging.Log("aid %d finish time handling error: %v", a.aid, err)
 		}
 		return
 	}
