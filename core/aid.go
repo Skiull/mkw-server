@@ -1,9 +1,13 @@
 package core
 
 import (
+	"encoding/binary"
 	"fmt"
 	"net"
+	"slices"
 	"time"
+
+	"mkw-server/logging"
 )
 
 // An Aid represents a single client's connection. Can have either one or two players.
@@ -31,8 +35,9 @@ type Aid struct {
 	// Distinguishes racers from non-racers. This is important for the countdown.
 	isRacer bool
 
-	sentRacePackets [maxRaceFrames][]byte
-	raceFrames      [maxRaceFrames]RaceFrameData
+	sentRacePackets   [maxRaceFrames][]byte
+	raceFrames        [maxRaceFrames]RaceFrameData
+	missingRaceFrames []uint16
 }
 
 var aids map[string]*Aid = make(map[string]*Aid)
@@ -65,6 +70,75 @@ func NewAid(addr string, room *Room, aid byte, hasGuest bool) (*Aid, error) {
 	}
 
 	return a, nil
+}
+
+const missingFramesMagic = 0x4D46
+const missingFramesAckMagic = 0x4D41
+
+func (a *Aid) handleMissingFrames() error {
+	for time, frame := range a.raceFrames {
+		// frame.Time being non-zero means we've received it. Continue. This doesn't work for
+		// the first frame though, so we instead check the position vector. TODO: Fix this hack.
+		if frame.Time != 0 || (time == 0 && frame.Pos != [3]float32{}) {
+			continue
+		}
+
+		if time >= int(a.raceFinishTime) {
+			break
+		}
+
+		a.missingRaceFrames = append(a.missingRaceFrames, uint16(time))
+	}
+
+	// If the aid has no missing frames, ack them immediately and return.
+	if len(a.missingRaceFrames) == 0 {
+		return a.sendMissingFramesAck()
+	}
+
+	// Otherwise, they are missing race frames and we need to tell them which ones are missing.
+	return a.sendMissingFramePacket()
+}
+
+func (a *Aid) sendMissingFramePacket() error {
+	// Structure:
+	// 0x0: "MF"
+	// 0x2: missingFramesCount
+	// 0x4: missingFrames[missingFramesCount]
+	buf := make([]byte, 0, 4+2*len(a.missingRaceFrames))
+	buf = binary.BigEndian.AppendUint16(buf, missingFramesMagic)
+	buf = binary.BigEndian.AppendUint16(buf, uint16(len(a.missingRaceFrames)))
+	for _, t := range a.missingRaceFrames {
+		buf = binary.BigEndian.AppendUint16(buf, t)
+	}
+
+	if _, err := room.conn.WriteTo(buf, a.addr); err != nil {
+		return fmt.Errorf("failed to send missing frames to aid %d: %w", a.aid, err)
+	}
+
+	logging.Log("requested %d missing frames from aid %d", len(a.missingRaceFrames), a.aid)
+
+	return nil
+}
+
+func (a *Aid) handleMissingFrameReceived(i int) error {
+	a.missingRaceFrames = slices.Delete(a.missingRaceFrames, i, i+1)
+
+	if len(a.missingRaceFrames) == 0 {
+		// Aid is no longer missing frames, send an ack.
+		err := a.sendMissingFramesAck()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (a *Aid) sendMissingFramesAck() error {
+	buf := binary.BigEndian.AppendUint16(nil, missingFramesAckMagic)
+	if _, err := room.conn.WriteTo(buf, a.addr); err != nil {
+		return fmt.Errorf("failed to send missing frames ack to aid %d: %w", a.aid, err)
+	}
+	return nil
 }
 
 func (a *Aid) SetRoomPointer(room *Room) {

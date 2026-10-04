@@ -4,6 +4,10 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"slices"
+	"time"
+
+	"mkw-server/logging"
 )
 
 // "FT"
@@ -69,18 +73,41 @@ func updateRoomFinishState() {
 		return
 	}
 
+	// All aids have finished the race if we've gotten to this point.
 	room.everyoneFinishedRace = true
-
 	onAllAidsFinishedRace()
 }
 
+// How long to wait for aids to resend missing frames before clearing race state.
+const missingFramesWait = 7 * time.Second
+
 func onAllAidsFinishedRace() {
-	// For now, just reset finish times and clear race frame and packet buffers.
-	// But we can also use this time to ask aids to resend anything missed.
+	// Request aids to send any missing race frames. Clients will stall on the "Please Wait..."
+	// screen after race results until the server eihter acks them back (all missing race frames
+	// have been resent) or kicks them (failure to resend race frames).
+	// TODO: Kicking aids.
 	for _, a := range aids {
 		if a == nil {
 			continue
 		}
+
+		if err := a.handleMissingFrames(); err != nil {
+			logging.Log("failed to request missing frames from aid %d: %v", a.aid, err)
+		}
+	}
+
+	// TODO: Ensure this runs after all aids have been acked or kicked. Don't want to
+	// reset everything while a race frame is being processed or something.
+
+	time.AfterFunc(missingFramesWait, resetAfterRace)
+}
+
+func resetAfterRace() {
+	for _, a := range aids {
+		if a == nil {
+			continue
+		}
+
 		clear(a.sentRacePackets[:])
 		clear(a.raceFrames[:])
 		a.raceFinishTime = 0
@@ -108,6 +135,10 @@ func parseRaceFrame(data []byte) (*RaceFrameData, error) {
 		return nil, fmt.Errorf("Read() error: %w", err)
 	}
 
+	if frame.Time >= maxRaceFrames {
+		return nil, fmt.Errorf("sent frame.Time (%d) > maxRaceFrames (%d)", frame.Time, maxRaceFrames)
+	}
+
 	return &frame, nil
 }
 
@@ -116,7 +147,15 @@ func handleRaceFrame(a *Aid, data []byte) error {
 	if err != nil {
 		return err
 	}
+
 	a.raceFrames[frame.Time] = *frame
+
+	// Check if the race frame was resent and handle.
+	if missingIdx := slices.Index(a.missingRaceFrames, frame.Time); missingIdx >= 0 {
+		if err := a.handleMissingFrameReceived(missingIdx); err != nil {
+			logging.Log("aid %d: %v", a.aid, err)
+		}
+	}
 
 	// Client expects the magic and time as an ack.
 	if _, err = room.conn.WriteTo(data[:raceFrameAckSize], a.addr); err != nil {
