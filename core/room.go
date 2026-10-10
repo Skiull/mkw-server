@@ -116,7 +116,7 @@ func handlePacket(pkt *Packet) {
 		return
 	}
 
-	if isRaceFramePacket(binary.BigEndian.Uint16(data[:2])) {
+	if len(data) == a.raceFrameSize && isRaceFramePacket(binary.BigEndian.Uint16(data)) {
 		err := handleRaceFrame(a, data)
 		if err != nil {
 			logging.Log("aid %d handleRaceFrame err %v", a.aid, err)

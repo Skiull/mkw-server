@@ -18,9 +18,10 @@ type Aid struct {
 
 	sendQueue chan Packet
 
-	aid      byte
-	hasGuest bool
-	players  []*Player
+	aid           byte
+	hasGuest      bool
+	raceFrameSize int
+	players       []*Player
 	// Time (in frames) the race results came up. Reset before the start of the next race.
 	raceFinishTime uint16
 
@@ -36,7 +37,7 @@ type Aid struct {
 	isRacer bool
 
 	sentRacePackets   [maxRaceFrames][]byte
-	raceFrames        [maxRaceFrames]RaceFrameData
+	raceFrames        [maxRaceFrames]RaceFrame
 	missingRaceFrames []uint16
 }
 
@@ -49,10 +50,11 @@ func NewAid(addr string, room *Room, aid byte, hasGuest bool) (*Aid, error) {
 	}
 
 	a := &Aid{
-		addr:      udpAddr,
-		sendQueue: make(chan Packet, 32),
-		aid:       aid,
-		hasGuest:  hasGuest,
+		addr:          udpAddr,
+		sendQueue:     make(chan Packet, 32),
+		aid:           aid,
+		hasGuest:      hasGuest,
+		raceFrameSize: calcRaceFrameSize(hasGuest),
 	}
 
 	p, err := newPlayer(aid, false)
@@ -79,7 +81,7 @@ func (a *Aid) handleMissingFrames() error {
 	for time, frame := range a.raceFrames {
 		// frame.Time being non-zero means we've received it. Continue. This doesn't work for
 		// the first frame though, so we instead check the position vector. TODO: Fix this hack.
-		if frame.Time != 0 || (time == 0 && frame.Pos != [3]float32{}) {
+		if frame.Time != 0 || (time == 0 && a.players[0].frames[frame.Time].Pos != [3]float32{}) {
 			continue
 		}
 
@@ -147,4 +149,13 @@ func (a *Aid) SetRoomPointer(room *Room) {
 
 func (a *Aid) GetAddr() string {
 	return a.addr.String()
+}
+
+func calcRaceFrameSize(hasGuest bool) int {
+	var expectedSize int = raceFrameSize + raceFramePlayerSize
+	if hasGuest {
+		// A guest will have their own RaceFramePlayer record
+		expectedSize += raceFramePlayerSize
+	}
+	return expectedSize
 }

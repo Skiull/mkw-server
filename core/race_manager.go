@@ -15,18 +15,23 @@ const finishTimeMagic = 0x4654
 
 // "RF"
 const raceFrameMagic = 0x5246
+const raceFrameMagicOffset = 0x2
 
 const finishTimeSize = 4
 
 // 60 frames per second, 60 seconds per minute, 6 minutes max per race.
 const maxRaceFrames = 60 * 60 * 6
 const raceFrameAckSize = 4
-const raceFramePacketSize = 0x44
+const raceFramePlayerSize = 0x10
+const raceFrameSize = 0x34
 
-type RaceFrameData struct {
+type RaceFramePlayer struct {
+	Inputs uint32
+	Pos    [3]float32
+}
+
+type RaceFrame struct {
 	Time     uint16
-	Inputs   uint32
-	Pos      [3]float32
 	SentTime [12]uint32
 }
 
@@ -110,6 +115,9 @@ func resetAfterRace() {
 
 		clear(a.sentRacePackets[:])
 		clear(a.raceFrames[:])
+		for _, p := range a.players {
+			clear(p.frames[:])
+		}
 		a.raceFinishTime = 0
 	}
 
@@ -120,19 +128,10 @@ func isRaceFramePacket(magic uint16) bool {
 	return magic == raceFrameMagic
 }
 
-func parseRaceFrame(data []byte) (*RaceFrameData, error) {
-	if len(data) != raceFramePacketSize {
-		return nil, fmt.Errorf("len(data) (%d) < raceFramePacketSize (%d)", len(data), raceFramePacketSize)
-	}
-
-	magic := binary.BigEndian.Uint16(data[:2])
-	if magic != raceFrameMagic {
-		return nil, fmt.Errorf("bad magic (%#x != %#x)", magic, raceFrameMagic)
-	}
-
-	var frame RaceFrameData
-	if err := binary.Read(bytes.NewReader(data[2:]), binary.BigEndian, &frame); err != nil {
-		return nil, fmt.Errorf("Read() error: %w", err)
+func parseRaceFrame(data []byte) (*RaceFrame, error) {
+	var frame RaceFrame
+	if err := binary.Read(bytes.NewReader(data), binary.BigEndian, &frame); err != nil {
+		return nil, fmt.Errorf("parseRaceFrame() error: %w", err)
 	}
 
 	if frame.Time >= maxRaceFrames {
@@ -142,13 +141,31 @@ func parseRaceFrame(data []byte) (*RaceFrameData, error) {
 	return &frame, nil
 }
 
+func parseRaceFramePlayer(data []byte) (*RaceFramePlayer, error) {
+	var playerFrame RaceFramePlayer
+	if err := binary.Read(bytes.NewReader(data), binary.BigEndian, &playerFrame); err != nil {
+		return nil, fmt.Errorf("parseRaceFramePlayer() error: %w", err)
+	}
+
+	return &playerFrame, nil
+}
+
 func handleRaceFrame(a *Aid, data []byte) error {
-	frame, err := parseRaceFrame(data)
+	frame, err := parseRaceFrame(data[raceFrameMagicOffset:raceFrameSize])
 	if err != nil {
 		return err
 	}
 
 	a.raceFrames[frame.Time] = *frame
+
+	for localPlayerId, player := range a.players {
+		offset := raceFrameSize + (localPlayerId * raceFramePlayerSize)
+		playerFrame, err := parseRaceFramePlayer(data[offset : offset+raceFramePlayerSize])
+		if err != nil {
+			return err
+		}
+		player.frames[frame.Time] = *playerFrame
+	}
 
 	// Check if the race frame was resent and handle.
 	if missingIdx := slices.Index(a.missingRaceFrames, frame.Time); missingIdx >= 0 {
