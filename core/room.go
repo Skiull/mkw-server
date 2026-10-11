@@ -132,6 +132,14 @@ func handlePacket(pkt *Packet) {
 		return
 	}
 
+	if a.calcConfigSize() == len(data) && isConfigPacket(data) {
+		err := handleConfigPacket(a, data)
+		if err != nil {
+			logging.Log("aid %d handleConfigPacket err: %v", a.aid, err)
+		}
+		return
+	}
+
 	if isRacePacket(data) {
 		err := handleRacePacket(a, data)
 		if err != nil {

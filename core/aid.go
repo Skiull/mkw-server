@@ -7,6 +7,7 @@ import (
 	"slices"
 	"time"
 
+	"mkw-server/common"
 	"mkw-server/logging"
 )
 
@@ -39,6 +40,11 @@ type Aid struct {
 	sentRacePackets   [maxRaceFrames][]byte
 	raceFrames        [maxRaceFrames]RaceFrame
 	missingRaceFrames []uint16
+
+	raceConfig  RaceConfig
+	rflWifiData [rflWifiDataSize]byte
+	regionLine  common.RegionLine
+	hasConfig   bool
 }
 
 var aids map[string]*Aid = make(map[string]*Aid)
@@ -158,4 +164,16 @@ func calcRaceFrameSize(hasGuest bool) int {
 		expectedSize += raceFramePlayerSize
 	}
 	return expectedSize
+}
+
+func (a *Aid) calcConfigSize() int {
+	return configSizeNoPlayers + a.localPlayerCount()*playerConfigSize
+}
+
+func (a *Aid) localPlayerCount() int {
+	if a.hasGuest {
+		return 2
+	} else {
+		return 1
+	}
 }

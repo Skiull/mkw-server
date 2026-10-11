@@ -10,9 +10,9 @@ const (
 	DefaultEngineClass EngineClass = iota
 	CC100
 	CC150
-	Mirror
+	Battle
 )
 
 func (e EngineClass) IsValid() bool {
-	return e >= DefaultEngineClass && e <= Mirror
+	return e >= DefaultEngineClass && e <= Battle
 }

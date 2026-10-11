@@ -6,6 +6,8 @@ type Player struct {
 	aid      byte
 	isGuest  bool
 
+	config PlayerConfig
+
 	frames [maxRaceFrames]RaceFramePlayer
 }
 

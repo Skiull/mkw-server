@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"slices"
-	"time"
 
 	"mkw-server/logging"
 )
@@ -83,9 +82,6 @@ func updateRoomFinishState() {
 	onAllAidsFinishedRace()
 }
 
-// How long to wait for aids to resend missing frames before clearing race state.
-const missingFramesWait = 7 * time.Second
-
 func onAllAidsFinishedRace() {
 	// Request aids to send any missing race frames. Clients will stall on the "Please Wait..."
 	// screen after race results until the server eihter acks them back (all missing race frames
@@ -100,14 +96,9 @@ func onAllAidsFinishedRace() {
 			logging.Log("failed to request missing frames from aid %d: %v", a.aid, err)
 		}
 	}
-
-	// TODO: Ensure this runs after all aids have been acked or kicked. Don't want to
-	// reset everything while a race frame is being processed or something.
-
-	time.AfterFunc(missingFramesWait, resetAfterRace)
 }
 
-func resetAfterRace() {
+func resetRace() {
 	for _, a := range aids {
 		if a == nil {
 			continue
@@ -119,8 +110,9 @@ func resetAfterRace() {
 			clear(p.frames[:])
 		}
 		a.raceFinishTime = 0
+		a.missingRaceFrames = nil
+		a.hasConfig = false
 	}
-
 	room.everyoneFinishedRace = false
 }
 

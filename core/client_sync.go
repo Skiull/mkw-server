@@ -86,10 +86,16 @@ func tryUpdateRoomCountdownState() {
 		return
 	}
 
+	// All aids must send their config for the countdown to start.
+	if unanimousState && !haveAllAidsSentConfig() {
+		return
+	}
+
 	room.countdownState = unanimousState
 
 	if room.countdownState {
 		logging.Log("All aids sent ready and room's countdown state updated. Room's countdown should start!")
+		resetRace()
 		beginSendStart()
 	} else {
 		logging.Log("All aids have started the countdown locally. Room's countdown state reset")
