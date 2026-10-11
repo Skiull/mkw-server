@@ -295,3 +295,14 @@ func isAidInRoom(aid byte) bool {
 	}
 	return false
 }
+
+func playerCount() byte {
+	var count byte
+	for _, a := range aids {
+		if a == nil || !a.isRacer {
+			continue
+		}
+		count += byte(len(a.players))
+	}
+	return count
+}

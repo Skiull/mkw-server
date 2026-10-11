@@ -83,7 +83,7 @@ func NewAid(addr string, room *Room, aid byte, hasGuest bool) (*Aid, error) {
 const missingFramesMagic = 0x4D46
 const missingFramesAckMagic = 0x4D41
 
-func (a *Aid) handleMissingFrames() error {
+func (a *Aid) updateMissingFrames() {
 	for time, frame := range a.raceFrames {
 		// frame.Time being non-zero means we've received it. Continue. This doesn't work for
 		// the first frame though, so we instead check the position vector. TODO: Fix this hack.
@@ -97,14 +97,6 @@ func (a *Aid) handleMissingFrames() error {
 
 		a.missingRaceFrames = append(a.missingRaceFrames, uint16(time))
 	}
-
-	// If the aid has no missing frames, ack them immediately and return.
-	if len(a.missingRaceFrames) == 0 {
-		return a.sendMissingFramesAck()
-	}
-
-	// Otherwise, they are missing race frames and we need to tell them which ones are missing.
-	return a.sendMissingFramePacket()
 }
 
 func (a *Aid) sendMissingFramePacket() error {
@@ -146,6 +138,16 @@ func (a *Aid) sendMissingFramesAck() error {
 	if _, err := room.conn.WriteTo(buf, a.addr); err != nil {
 		return fmt.Errorf("failed to send missing frames ack to aid %d: %w", a.aid, err)
 	}
+
+	// Try to create the replay file if we aren't missing race frames from anyone
+	if !replayFileCreated && haveAllRaceFrames() {
+		replayFileCreated = true
+		err := createReplayFile()
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 

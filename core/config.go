@@ -17,11 +17,11 @@ const configAckMagic = 0x4341
 const raceConfigSize = 0x5
 
 type RaceConfig struct {
-	Course      common.Course
-	EngineClass common.EngineClass
-	GameMode    common.GameMode
-	BattleType  common.BattleType
-	ModeFlags   common.GameModeFlags
+	Course        common.Course
+	EngineClass   common.EngineClass
+	GameMode      common.GameMode
+	BattleType    common.BattleType
+	GameModeFlags common.GameModeFlags
 }
 
 const rflWifiDataSize = 0xa0

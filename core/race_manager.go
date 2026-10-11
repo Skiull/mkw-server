@@ -24,6 +24,10 @@ const raceFrameAckSize = 4
 const raceFramePlayerSize = 0xe
 const raceFrameSize = 0x34 // The + 0x2 difference from the struct accounts for the magic.
 
+var numAidsAtRaceStart byte
+var numPlayersAtRaceStart byte
+var replayFileCreated bool = false
+
 type RaceFramePlayer struct {
 	Inputs uint16
 	Pos    [3]float32
@@ -82,18 +86,35 @@ func updateRoomFinishState() {
 	onAllAidsFinishedRace()
 }
 
+// When everyone has finished the race, aids will stall on the "Please Wait..." screen
+// until the server either acks them back (all missing race frames have been resent) or kicks
+// them (failure to resend missing race frames). TODO: Kicking aids.
 func onAllAidsFinishedRace() {
-	// Request aids to send any missing race frames. Clients will stall on the "Please Wait..."
-	// screen after race results until the server eihter acks them back (all missing race frames
-	// have been resent) or kicks them (failure to resend race frames).
-	// TODO: Kicking aids.
+	// Find any race frames that aids are missing.
 	for _, a := range aids {
-		if a == nil {
+		if a == nil || !a.isRacer {
 			continue
 		}
 
-		if err := a.handleMissingFrames(); err != nil {
-			logging.Log("failed to request missing frames from aid %d: %v", a.aid, err)
+		a.updateMissingFrames()
+	}
+
+	// Send either an ack or a request to resend missing race frames.
+	for _, a := range aids {
+		if a == nil || !a.isRacer {
+			continue
+		}
+
+		if len(a.missingRaceFrames) == 0 {
+			err := a.sendMissingFramesAck()
+			if err != nil {
+				logging.Log("sending missing frames ack to aid %d failed", a.aid)
+			}
+		} else {
+			err := a.sendMissingFramePacket()
+			if err != nil {
+				logging.Log("sending missing frames packet to aid %d failed", a.aid)
+			}
 		}
 	}
 }
@@ -113,7 +134,11 @@ func resetRace() {
 		a.missingRaceFrames = nil
 		a.hasConfig = false
 	}
+	replayFileCreated = false
 	room.everyoneFinishedRace = false
+
+	numAidsAtRaceStart = byte(len(aids))
+	numPlayersAtRaceStart = playerCount()
 }
 
 func isRaceFramePacket(magic uint16) bool {
@@ -171,4 +196,19 @@ func handleRaceFrame(a *Aid, data []byte) error {
 		return fmt.Errorf("failed to send race frame ack to aid %d: %w", a.aid, err)
 	}
 	return nil
+}
+
+func haveAllRaceFrames() bool {
+	for _, a := range aids {
+		if a == nil || !a.isRacer {
+			continue
+		}
+
+		if len(a.missingRaceFrames) == 0 {
+			continue
+		}
+		return false
+	}
+
+	return true
 }
