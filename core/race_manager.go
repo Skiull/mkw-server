@@ -21,11 +21,11 @@ const finishTimeSize = 4
 // 60 frames per second, 60 seconds per minute, 6 minutes max per race.
 const maxRaceFrames = 60 * 60 * 6
 const raceFrameAckSize = 4
-const raceFramePlayerSize = 0x10
-const raceFrameSize = 0x34
+const raceFramePlayerSize = 0xe
+const raceFrameSize = 0x34 // The + 0x2 difference from the struct accounts for the magic.
 
 type RaceFramePlayer struct {
-	Inputs uint32
+	Inputs uint16
 	Pos    [3]float32
 }
 
