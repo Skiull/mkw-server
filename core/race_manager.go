@@ -18,11 +18,11 @@ const raceFrameMagicOffset = 0x2
 
 const finishTimeSize = 4
 
-// 60 frames per second, 60 seconds per minute, 6 minutes max per race.
+// 60 frames per second, 60 seconds per minute, 5 minutes max per race.
 const maxRaceFrames = 60 * 60 * 6
 const raceFrameAckSize = 4
 const raceFramePlayerSize = 0xe
-const raceFrameSize = 0x34 // The + 0x2 difference from the struct accounts for the magic.
+const raceFrameSize = 0x1c // The + 0x2 difference from the struct accounts for the magic.
 
 var numAidsAtRaceStart byte
 var numPlayersAtRaceStart byte
@@ -35,7 +35,7 @@ type RaceFramePlayer struct {
 
 type RaceFrame struct {
 	Time     uint16
-	SentTime [12]uint32
+	SentTime [12]uint16
 }
 
 func isFinishTimePacket(data []byte) bool {

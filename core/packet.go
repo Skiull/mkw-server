@@ -1,7 +1,6 @@
 package core
 
 import (
-	"fmt"
 	"net"
 	"time"
 )
@@ -38,10 +37,9 @@ func handleRacePacket(aid *Aid, data []byte) error {
 	// no purpose for verification.
 	if raceInfo.StartedRace() && racePacket.Header.UserLen() == 0 {
 		time := raceInfo.Time()
-		if time > maxRaceFrames {
-			return fmt.Errorf("time (%d) > maxRaceFrames (%d)", time, maxRaceFrames)
+		if time < maxRaceFrames {
+			aid.sentRacePackets[time] = data
 		}
-		aid.sentRacePackets[time] = data
 	}
 
 	return nil
