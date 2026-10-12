@@ -2,8 +2,6 @@ package core
 
 import (
 	"fmt"
-
-	"mkw-server/logging"
 )
 
 const NoIdx = 0xff
@@ -66,7 +64,6 @@ func (a *Aid) idxToAidMap() []byte {
 	for _, aid := range aidsAtRaceStart {
 		if aid != a.aid {
 			out = append(out, aid)
-
 		}
 	}
 	return out
@@ -190,13 +187,21 @@ func (a *Aid) createRacePacketRecord(disconnected bool) (RacePacketRecord, error
 	aid := a.aid
 	index := a.createRacePacketIndex(disconnected)
 
-	logging.Log("Created race packet index for aid %d, total size %d, race packet count %d", a.aid, index.TotalSize, index.RacePacketCount)
+	packets := make([][]byte, 0, index.RacePacketCount)
+	for _, p := range a.sentRacePackets[:len(index.TimeToOffsetIdx)] {
+		if len(p) == 0 {
+			continue
+		}
+		packets = append(packets, p)
+
+	}
 
 	rec := RacePacketRecord{
 		Index:       index,
 		Aid:         aid,
-		RacePackets: a.sentRacePackets[:],
+		RacePackets: packets,
 	}
+
 	return rec, nil
 }
 

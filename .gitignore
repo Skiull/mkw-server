@@ -1,4 +1,6 @@
 logs/*
+replays/*
+
 .nvim.lua
 
 mkw-server

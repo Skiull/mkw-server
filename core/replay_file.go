@@ -8,9 +8,9 @@ import (
 	"mkw-server/logging"
 )
 
-const version = 0
-
 const replayFileMagic = 0x52504c59 // "RPLY"
+
+const version = 0
 
 type ReplayFileHeader struct {
 	Magic         uint32
@@ -31,8 +31,11 @@ type AidRecord struct {
 	LocalPlayerCount byte
 	Disconnected     bool
 	AidConfig        AidConfig
-	IdxToAidMap      []byte
-	TimeRecvPackets  [][]uint16
+	// Maps the index of time recv packets to the aid.
+	IdxToAidMap []byte
+	// TimeRecvPackets[idx][time] the sent time (senders time stamp) of the
+	// packet this aid received.
+	TimeRecvPackets [][]uint16
 }
 
 type PlayerRecord struct {
@@ -43,10 +46,14 @@ type PlayerRecord struct {
 }
 
 type RacePacketIndex struct {
+	// Sum of the size of race packets
 	TotalSize       uint32
 	RacePacketCount uint16
+	// Maps the time to the index of PacketOffsets. If the server doesn't have a race
+	// packet at a given time, its value is 0xffff.
 	TimeToOffsetIdx []uint16
-	PacketOffsets   []uint32
+	// Offset of the start of a race packet.
+	PacketOffsets []uint32
 }
 
 type RacePacketRecord struct {
@@ -64,7 +71,6 @@ var disconnectedPlayersRecords []PlayerRecord
 var disconnectedRacePacketRecords []RacePacketRecord
 
 func createReplayFile() error {
-	logging.Log("Creating replay file!")
 	h, err := createReplayFileHeader()
 	if err != nil {
 		return err
@@ -87,8 +93,13 @@ func createReplayFile() error {
 		return err
 	}
 
-	// TODO: Actually call this function async after file has been created.
-	onReplayFileCreated()
+	// TODO: This should be async.
+	err = writeReplayFile()
+	if err != nil {
+		return err
+	}
+
+	resetReplayFile()
 
 	return nil
 }
@@ -193,7 +204,7 @@ func createRacePackets() error {
 	return nil
 }
 
-func onReplayFileCreated() {
+func resetReplayFile() {
 	numPlayersAtRaceStart = 0
 	aidsAtRaceStart = aidsAtRaceStart[:0]
 	aidRecords = aidRecords[:0]
