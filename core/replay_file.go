@@ -1,6 +1,7 @@
 package core
 
 import (
+	"cmp"
 	"slices"
 
 	"mkw-server/common"
@@ -109,6 +110,11 @@ func createAidRecords() error {
 		aidRecords = append(aidRecords, *aidRecord)
 	}
 
+	// Sort records by the Aid for indexing to work, the aids map is unsorted.
+	slices.SortFunc(aidRecords, func(a, b AidRecord) int {
+		return cmp.Compare(a.Aid, b.Aid)
+	})
+
 	logging.Log("Done creating %d aid records!", len(aidRecords))
 
 	return nil
@@ -130,6 +136,11 @@ func createPlayerRecords() error {
 			playerRecords = append(playerRecords, record)
 		}
 	}
+
+	// Sort by playerId
+	slices.SortFunc(playerRecords, func(a, b PlayerRecord) int {
+		return cmp.Compare(a.PlayerId, b.PlayerId)
+	})
 
 	logging.Log("Finished creating %d Player records", len(playerRecords))
 
