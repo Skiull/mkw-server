@@ -117,21 +117,19 @@ func serializeReplayFile() ([]byte, error) {
 	header.CRC32 = 0
 	write(header)
 
-	for _, r := range aidRecords {
-		write(r.Aid)
-		write(r.RaceFinishTime)
-		write(r.LocalPlayerCount)
-		write(r.Disconnected)
-		write(r.AidConfig)
+	for _, a := range aidRecords {
+		write(a.Aid)
+		write(a.RaceFinishTime)
+		write(a.LocalPlayerCount)
+		write(a.Disconnected)
+		write(a.AidConfig)
 
-		write(byte(len(r.IdxToAidMap)))
-		write(r.IdxToAidMap)
+		write(byte(len(a.IdxToAidMap)))
+		write(a.IdxToAidMap)
 
-		// Rows are maxRaceFrames long, but nothing after the end time is meaningful.
-		for _, row := range r.TimeRecvPackets {
-			n := min(int(r.RaceFinishTime), len(row))
-			write(uint16(n))
-			write(row[:n])
+		for _, times := range a.TimeRecvPackets {
+			write(uint16(len(times)))
+			write(times)
 		}
 	}
 

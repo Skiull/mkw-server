@@ -43,17 +43,17 @@ func (a *Aid) getEndTime(disconnected bool) uint16 {
 }
 
 func (a *Aid) createAidRecord(disconnected bool) (*AidRecord, error) {
-	time := a.getEndTime(disconnected)
+	endTime := a.getEndTime(disconnected)
 	idxToAid := a.idxToAidMap()
 
 	return &AidRecord{
 		Aid:              a.aid,
-		RaceFinishTime:   time,
+		RaceFinishTime:   endTime,
 		Disconnected:     disconnected,
 		LocalPlayerCount: byte(a.localPlayerCount()),
 		AidConfig:        a.aidConfig,
 		IdxToAidMap:      idxToAid,
-		TimeRecvPackets:  a.createTimeRecvPackets(idxToAid),
+		TimeRecvPackets:  a.createTimeRecvPackets(idxToAid, endTime),
 	}, nil
 }
 
@@ -81,10 +81,10 @@ func (a *Aid) aidToIdxMap(idxToAid []byte) [12]byte {
 	return aidToIdx
 }
 
-func (a *Aid) createTimeRecvPackets(idxToAid []byte) [][]uint16 {
+func (a *Aid) createTimeRecvPackets(idxToAid []byte, endTime uint16) [][]uint16 {
 	aidToIdx := a.aidToIdxMap(idxToAid)
 
-	numFrames := len(a.raceFrames)
+	numFrames := endTime
 
 	timeRecvPackets := make([][]uint16, len(idxToAid))
 	for i := range timeRecvPackets {
@@ -92,7 +92,8 @@ func (a *Aid) createTimeRecvPackets(idxToAid []byte) [][]uint16 {
 	}
 
 	// Loop over all RaceFrame to get the SentTime of the sending aid.
-	for t := 0; t < numFrames; t++ {
+	var t uint16
+	for t = 0; t < numFrames; t++ {
 		frame := &a.raceFrames[t]
 		for senderAid, sentTime := range frame.SentTime {
 			idx := aidToIdx[senderAid]
