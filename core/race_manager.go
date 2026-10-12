@@ -26,6 +26,7 @@ const raceFrameSize = 0x1c // The + 0x2 difference from the struct accounts for 
 
 var numAidsAtRaceStart byte
 var numPlayersAtRaceStart byte
+var aidsAtRaceStart []byte
 var replayFileCreated bool = false
 
 type RaceFramePlayer struct {
@@ -136,9 +137,16 @@ func resetRace() {
 	}
 	replayFileCreated = false
 	room.everyoneFinishedRace = false
+	aidsAtRaceStart = aidsAtRaceStart[:]
 
-	numAidsAtRaceStart = byte(len(aids))
 	numPlayersAtRaceStart = playerCount()
+	for _, a := range aids {
+		if a == nil || !a.isRacer {
+			continue
+		}
+
+		aidsAtRaceStart = append(aidsAtRaceStart, a.aid)
+	}
 }
 
 func isRaceFramePacket(magic uint16) bool {

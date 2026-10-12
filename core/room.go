@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"slices"
 	"time"
 
 	"mkw-server/logging"
@@ -245,6 +246,12 @@ func RemoveAidFromRoom(aidAddr string) error {
 
 	if a == nil {
 		return fmt.Errorf("Aid %s not in room, can't remove", aidAddr)
+	}
+
+	// If someone is in the race and is removed, create whatever is needed from them to create
+	// a replay file before they're deleted from memory.
+	if !replayFileCreated && slices.Contains(aidsAtRaceStart, a.aid) {
+		saveDisconnectedAidRecord(a)
 	}
 
 	room.aidBitmap = util.ClearAid(room.aidBitmap, a.aid)

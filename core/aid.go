@@ -7,7 +7,6 @@ import (
 	"slices"
 	"time"
 
-	"mkw-server/common"
 	"mkw-server/logging"
 )
 
@@ -26,6 +25,9 @@ type Aid struct {
 	// Time (in frames) the race results came up. Reset before the start of the next race.
 	raceFinishTime uint16
 
+	// Used in place of raceFinishTime in the event of a disconnect.
+	lastSentTime uint16
+
 	readyForCountdown bool
 
 	// Used to support countdown logic and the aid's ping control.
@@ -41,10 +43,9 @@ type Aid struct {
 	raceFrames        [maxRaceFrames]RaceFrame
 	missingRaceFrames []uint16
 
-	raceConfig  RaceConfig
-	rflWifiData [rflWifiDataSize]byte
-	regionLine  common.RegionLine
-	hasConfig   bool
+	raceConfig RaceConfig
+	aidConfig  AidConfig
+	hasConfig  bool
 }
 
 var aids map[string]*Aid = make(map[string]*Aid)

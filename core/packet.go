@@ -36,10 +36,11 @@ func handleRacePacket(aid *Aid, data []byte) error {
 	// useful for players not currently in the race (ex, someone joining a public room), serves
 	// no purpose for verification.
 	if raceInfo.StartedRace() && racePacket.Header.UserLen() == 0 {
-		time := raceInfo.Time()
+		time := uint16(raceInfo.Time())
 		if time < maxRaceFrames {
 			aid.sentRacePackets[time] = data
 		}
+		aid.lastSentTime = time
 	}
 
 	return nil

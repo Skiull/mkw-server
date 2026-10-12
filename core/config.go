@@ -68,8 +68,7 @@ func handleConfigPacket(a *Aid, data []byte) error {
 	}
 
 	a.raceConfig = config.Race
-	a.regionLine = config.Aid.RegionLine
-	a.rflWifiData = config.Aid.RFLWifiData
+	a.aidConfig = config.Aid
 	a.hasConfig = true
 
 	playerConfigs := make([]PlayerConfig, a.localPlayerCount())
@@ -79,6 +78,7 @@ func handleConfigPacket(a *Aid, data []byte) error {
 
 	for i, p := range a.players {
 		p.config = playerConfigs[i]
+		p.playerId = p.config.PlayerId // TODO: This shouldn't happen here! Way too late!
 	}
 
 	// All aids must send a config for the countdown to start, try to update the countdown state.
