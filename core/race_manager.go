@@ -132,13 +132,18 @@ func resetRace() {
 			clear(p.frames[:])
 		}
 		a.raceFinishTime = 0
+		a.lastSentTime = 0
 		a.missingRaceFrames = nil
 		a.hasConfig = false
 	}
 	replayFileCreated = false
 	room.everyoneFinishedRace = false
-	aidsAtRaceStart = aidsAtRaceStart[:]
 
+	disconnectedAidRecords = nil
+	disconnectedPlayersRecords = nil
+	disconnectedRacePacketRecords = nil
+
+	aidsAtRaceStart = aidsAtRaceStart[:]
 	numPlayersAtRaceStart = playerCount()
 	for _, a := range aids {
 		if a == nil || !a.isRacer {

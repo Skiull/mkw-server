@@ -42,11 +42,26 @@ type PlayerRecord struct {
 	RaceFrame []RaceFramePlayer
 }
 
+type RacePacketIndex struct {
+	TotalSize       uint32
+	RacePacketCount uint16
+	TimeToOffsetIdx []uint16
+	PacketOffsets   []uint32
+}
+
+type RacePacketRecord struct {
+	Index       RacePacketIndex
+	Aid         byte
+	RacePackets [][]byte
+}
+
 var header ReplayFileHeader
 var aidRecords []AidRecord
 var playerRecords []PlayerRecord
+var racePacketRecords []RacePacketRecord
 var disconnectedAidRecords []AidRecord
 var disconnectedPlayersRecords []PlayerRecord
+var disconnectedRacePacketRecords []RacePacketRecord
 
 func createReplayFile() error {
 	logging.Log("Creating replay file!")
@@ -63,6 +78,11 @@ func createReplayFile() error {
 	}
 
 	err = createPlayerRecords()
+	if err != nil {
+		return err
+	}
+
+	err = createRacePackets()
 	if err != nil {
 		return err
 	}
@@ -147,6 +167,32 @@ func createPlayerRecords() error {
 	return nil
 }
 
+func createRacePackets() error {
+	logging.Log("Creating race packet records!")
+
+	// Clear out all aid records except for the disconnected records.
+	racePacketRecords = append(racePacketRecords[:0], disconnectedRacePacketRecords...)
+
+	for _, a := range aids {
+		if a == nil || !slices.Contains(aidsAtRaceStart, a.aid) {
+			continue
+		}
+
+		rec, err := a.createRacePacketRecord(false)
+		if err != nil {
+			return err
+		}
+
+		racePacketRecords = append(racePacketRecords, rec)
+	}
+
+	slices.SortFunc(racePacketRecords, func(a, b RacePacketRecord) int {
+		return cmp.Compare(a.Aid, b.Aid)
+	})
+
+	return nil
+}
+
 func onReplayFileCreated() {
 	numPlayersAtRaceStart = 0
 	aidsAtRaceStart = aidsAtRaceStart[:0]
@@ -154,4 +200,6 @@ func onReplayFileCreated() {
 	disconnectedAidRecords = disconnectedAidRecords[:0]
 	playerRecords = playerRecords[:0]
 	disconnectedPlayersRecords = disconnectedPlayersRecords[:0]
+	racePacketRecords = racePacketRecords[:0]
+	disconnectedRacePacketRecords = disconnectedRacePacketRecords[:0]
 }

@@ -36,11 +36,16 @@ func (r *RaceConfig) equals(r2 RaceConfig) bool {
 	return r.Course == r2.Course && r.EngineClass == r2.EngineClass && r.GameMode == r2.GameMode && r.BattleType == r2.BattleType && r.GameModeFlags == r2.GameModeFlags
 }
 
-func (a *Aid) createAidRecord(disconnected bool) (*AidRecord, error) {
-	var time = a.raceFinishTime
+// Returns the lastSentTime if disconnected, raceFinishTime if not
+func (a *Aid) getEndTime(disconnected bool) uint16 {
 	if disconnected {
-		time = a.lastSentTime
+		return a.lastSentTime
 	}
+	return a.raceFinishTime
+}
+
+func (a *Aid) createAidRecord(disconnected bool) (*AidRecord, error) {
+	time := a.getEndTime(disconnected)
 	idxToAid := a.idxToAidMap()
 
 	return &AidRecord{
@@ -104,19 +109,25 @@ func (a *Aid) createTimeRecvPackets(idxToAid []byte) [][]uint16 {
 	return timeRecvPackets
 }
 
-func saveDisconnectedAidRecord(a *Aid) {
+func saveDisconnectedAidRecord(a *Aid) error {
 	r, err := a.createAidRecord(true)
 	if err != nil {
-		logging.Log("Failed to save/create disconnected aids (%d) AidRecord: %v", a.aid, err)
+		return err
 	}
 
 	r.Disconnected = true
 	disconnectedAidRecords = append(disconnectedAidRecords, *r)
 
+	err = a.saveDisconnectedRacePacketRecord()
+	if err != nil {
+		return err
+	}
+
 	for _, p := range a.players {
 		saveDisconnectedPlayerRecord(p, a.lastSentTime)
 	}
 
+	return nil
 }
 
 func (p *Player) createPlayerRecord(lastSentTime uint16) PlayerRecord {
@@ -133,4 +144,68 @@ func (p *Player) createPlayerRecord(lastSentTime uint16) PlayerRecord {
 func saveDisconnectedPlayerRecord(p *Player, lastSentTime uint16) {
 	record := p.createPlayerRecord(lastSentTime)
 	disconnectedPlayersRecords = append(disconnectedPlayersRecords, record)
+}
+
+const NoPacket = 0xffff
+
+func (a *Aid) createRacePacketIndex(disconnected bool) RacePacketIndex {
+	var totalSize uint32
+	var racePacketCount uint16
+
+	time := a.getEndTime(disconnected)
+	packets := a.sentRacePackets[:time]
+
+	// Count the packets we actually received so packetOffsets has no empty entries.
+	var receivedCount int
+	for _, p := range packets {
+		if len(p) != 0 {
+			receivedCount++
+		}
+	}
+
+	timeToOffset := make([]uint16, time)
+	packetOffsets := make([]uint32, receivedCount)
+
+	for t, p := range packets {
+		if len(p) == 0 {
+			// No packet on this frame.
+			timeToOffset[t] = NoPacket
+			continue
+		}
+		timeToOffset[t] = racePacketCount
+		packetOffsets[racePacketCount] = totalSize
+		racePacketCount++
+		totalSize += uint32(len(p))
+	}
+
+	return RacePacketIndex{
+		TotalSize:       totalSize,
+		RacePacketCount: racePacketCount,
+		TimeToOffsetIdx: timeToOffset,
+		PacketOffsets:   packetOffsets,
+	}
+}
+
+func (a *Aid) createRacePacketRecord(disconnected bool) (RacePacketRecord, error) {
+	aid := a.aid
+	index := a.createRacePacketIndex(disconnected)
+
+	logging.Log("Created race packet index for aid %d, total size %d, race packet count %d", a.aid, index.TotalSize, index.RacePacketCount)
+
+	rec := RacePacketRecord{
+		Index:       index,
+		Aid:         aid,
+		RacePackets: a.sentRacePackets[:],
+	}
+	return rec, nil
+}
+
+func (a *Aid) saveDisconnectedRacePacketRecord() error {
+	rec, err := a.createRacePacketRecord(true)
+	if err != nil {
+		return err
+	}
+
+	disconnectedRacePacketRecords = append(disconnectedRacePacketRecords, rec)
+	return nil
 }

@@ -251,7 +251,11 @@ func RemoveAidFromRoom(aidAddr string) error {
 	// If someone is in the race and is removed, create whatever is needed from them to create
 	// a replay file before they're deleted from memory.
 	if !replayFileCreated && slices.Contains(aidsAtRaceStart, a.aid) {
-		saveDisconnectedAidRecord(a)
+		err := saveDisconnectedAidRecord(a)
+		if err != nil {
+			// Just log, don't return since we need to delete aid no matter what.
+			logging.Log("RemoveAidFromRoom() failed aid %d: %v", a.aid, err)
+		}
 	}
 
 	room.aidBitmap = util.ClearAid(room.aidBitmap, a.aid)
