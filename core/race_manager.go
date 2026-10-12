@@ -18,7 +18,7 @@ const raceFrameMagicOffset = 0x2
 
 const finishTimeSize = 4
 
-// 60 frames per second, 60 seconds per minute, 5 minutes max per race.
+// 60 frames per second, 60 seconds per minute, 6 minutes max per race.
 const maxRaceFrames = 60 * 60 * 6
 const raceFrameAckSize = 4
 const raceFramePlayerSize = 0xe
