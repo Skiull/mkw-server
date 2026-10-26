@@ -28,6 +28,10 @@ type RaceInfo struct {
 }
 
 func ParseRaceInfo(data []byte) (*RaceInfo, error) {
+	if len(data) != RaceInfoLen {
+		return nil, fmt.Errorf("size mismatch (%d != %d)", len(data), RaceInfoLen)
+	}
+
 	countdownElapsedTime := binary.BigEndian.Uint32(data[:0x4])
 	raceSeed := binary.BigEndian.Uint32(data[0x4:0x8])
 
@@ -84,8 +88,10 @@ func ParseRaceInfo(data []byte) (*RaceInfo, error) {
 		return nil, fmt.Errorf("invalid playerType (%d)", playerType)
 	}
 
-	// TODO: Some sort of validation.
 	playerIdToAidMap := [12]byte(data[0x18:0x24])
+	if err := validatePlayerIdToAidMap(playerIdToAidMap); err != nil {
+		return nil, err
+	}
 
 	engineClass := common.EngineClass(data[0x24])
 	if !engineClass.IsValid() {
@@ -109,4 +115,21 @@ func ParseRaceInfo(data []byte) (*RaceInfo, error) {
 		playerIdToAidMap:          playerIdToAidMap,
 		engineClass:               engineClass,
 	}, nil
+}
+
+func (r *RaceInfo) CountdownElapsedTime() uint32 {
+	return r.countdownElapsedTime
+}
+
+func (r *RaceInfo) PlayerType() common.PlayerType {
+	return r.playerType
+}
+
+func (r *RaceInfo) IsRacer() bool {
+	return r.playerType == common.Racer
+}
+
+// GameMode is the mode being played, derived from the course and game mode info.
+func (r *RaceInfo) GameMode() common.GameMode {
+	return common.GameModeFor(r.coursePlayed, r.gameModeInfo)
 }
