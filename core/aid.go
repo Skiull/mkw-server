@@ -4,19 +4,19 @@ import (
 	"fmt"
 	"net"
 	"time"
+
+	"mkw-server/common"
+	"mkw-server/core/records"
 )
 
 // An Aid represents a single client's connection. Can have either one or two players.
 type Aid struct {
-	conn        net.UDPConn  // Address aids send and receive from
-	addr        *net.UDPAddr // The resolved UDP address of this aid
-	roomPointer *Room        // The room this aid is in
-
-	sendQueue chan Packet
+	addr *net.UDPAddr // The resolved UDP address of this aid
 
 	aid      byte
+	isHost   bool
 	hasGuest bool
-	players []*Player
+	players  []*Player
 
 	readyForCountdown bool
 
@@ -28,44 +28,65 @@ type Aid struct {
 
 	// Distinguishes racers from non-racers. This is important for the countdown.
 	isRacer bool
+
+	// Friend code from the aid's first User record. A client can't change identity mid-session.
+	friendCode uint64
+
+	// Times of recent invalid packets, used to decide when to kick.
+	strikes []time.Time
+	kicked  bool
+
+	// Game mode and whether the race is underway, from the latest RaceInfo.
+	mode        common.GameMode
+	raceStarted bool
+
+	// Previous packet's EVENT slot bytes, to spot newly added item events.
+	lastEventSlots [records.EventSlotCount]byte
+	hasEventSlots  bool
 }
 
-var aids map[string]*Aid = make(map[string]*Aid)
+// aids is keyed by UDP address. Guarded by mu.
+var aids = make(map[string]*Aid)
 
-func NewAid(addr string, room *Room, aid byte, hasGuest bool) (*Aid, error) {
+func NewAid(addr string, aid byte, isHost bool, hasGuest bool) (*Aid, error) {
+	if aid >= records.MaxAids {
+		return nil, fmt.Errorf("invalid aid %d", aid)
+	}
+
 	udpAddr, err := net.ResolveUDPAddr("udp", addr)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to resolve aid address %s: %v", addr, err)
+		return nil, fmt.Errorf("failed to resolve aid address %s: %w", addr, err)
 	}
 
 	a := &Aid{
-		addr:      udpAddr,
-		sendQueue: make(chan Packet, 32),
-		aid:       aid,
-		hasGuest:  hasGuest,
+		addr:     udpAddr,
+		aid:      aid,
+		isHost:   isHost,
+		hasGuest: hasGuest,
 	}
 
-	p, err := newPlayer(aid, false)
-	if err != nil {
-		return nil, err
-	}
-
-	a.players = append(a.players, p)
+	a.players = append(a.players, newPlayer(aid, false))
 	if hasGuest {
-		p2, err := newPlayer(aid, true)
-		if err != nil {
-			return nil, err
-		}
-		a.players = append(a.players, p2)
+		a.players = append(a.players, newPlayer(aid, true))
 	}
 
 	return a, nil
 }
 
-func (a *Aid) SetRoomPointer(room *Room) {
-	a.roomPointer = room
-}
-
 func (a *Aid) GetAddr() string {
 	return a.addr.String()
+}
+
+func (a *Aid) localPlayerCount() int {
+	return len(a.players)
+}
+
+// context is what packet validation knows about this aid. Caller must hold mu.
+func (a *Aid) context() *records.Context {
+	return &records.Context{
+		SenderAid:        a.aid,
+		LocalPlayerCount: a.localPlayerCount(),
+		IsHost:           a.isHost,
+		IsAidInRoom:      isAidInRoom,
+	}
 }

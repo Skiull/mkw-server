@@ -32,11 +32,16 @@ type Select struct {
 	engineClass      common.EngineClass
 }
 
-func parseSelectPlayer(data []byte) (*SelectPlayerInfo, error) {
-	// TODO: Validate.
-	spot := binary.BigEndian.Uint16(data[0x0:0x2])
+// A player's rank in the previous race. 0 before the first race.
+const maxSelectRank = 12
 
-	// TODO: Validate.
+func parseSelectPlayer(data []byte) (*SelectPlayerInfo, error) {
+	spot := binary.BigEndian.Uint16(data[0x0:0x2])
+	if spot > maxSelectRank {
+		return nil, fmt.Errorf("invalid spot (%d)", spot)
+	}
+
+	// Accumulated event points. Any value is reachable over a long enough event.
 	points := binary.BigEndian.Uint16(data[0x2:0x4])
 
 	character := common.Character(data[0x4])
@@ -69,7 +74,19 @@ func parseSelectPlayer(data []byte) (*SelectPlayerInfo, error) {
 	}, nil
 }
 
-func ParseSelect(data []byte, isAidInRoom func(byte) bool) (*Select, error) {
+// Without a guest, player 2's fields hold fixed default values.
+func (p *SelectPlayerInfo) isEmptyGuest() bool {
+	return p.spot == 0 && p.points == 0 &&
+		p.character == common.SelectDefaultCharacter &&
+		p.vehicle == common.SelectDefaultVehicle &&
+		p.vote == common.Random
+}
+
+func ParseSelect(data []byte, ctx *Context) (*Select, error) {
+	if len(data) != SelectLen {
+		return nil, fmt.Errorf("size mismatch (%d != %d)", len(data), SelectLen)
+	}
+
 	timeSender := binary.BigEndian.Uint64(data[0x0:0x8])
 	timeReceiver := binary.BigEndian.Uint64(data[0x8:0x10])
 
@@ -78,22 +95,32 @@ func ParseSelect(data []byte, isAidInRoom func(byte) bool) (*Select, error) {
 		return nil, err
 	}
 
-	// TODO: Check if aid has a guest before attempting to parse.
 	p2Info, err := parseSelectPlayer(data[0x18:0x20])
 	if err != nil {
 		return nil, err
 	}
 
+	if ctx.hasGuest() {
+		// Both players on a console vote together.
+		if p2Info.vote != p1Info.vote {
+			return nil, fmt.Errorf("guest vote (%d) != player 1 vote (%d)", p2Info.vote, p1Info.vote)
+		}
+	} else if !p2Info.isEmptyGuest() {
+		return nil, fmt.Errorf("guest data present without a guest (%+v)", *p2Info)
+	}
+
 	seed := binary.BigEndian.Uint32(data[0x20:0x24])
 
-	gameModeInfoRaw := binary.BigEndian.Uint32(data[0x8:0xc])
+	gameModeInfoRaw := binary.BigEndian.Uint32(data[0x24:0x28])
 	gameModeInfo, err := common.ParseGameModeInfo(gameModeInfoRaw, common.RoomSelect)
 	if err != nil {
 		return nil, fmt.Errorf("invalid gameModeInfo: %v", err)
 	}
 
-	// TODO: Validate.
 	playerIdToAidMap := [12]byte(data[0x28:0x34])
+	if err := validatePlayerIdToAidMap(playerIdToAidMap); err != nil {
+		return nil, err
+	}
 
 	selectedCourse := common.Course(data[0x34])
 	if !selectedCourse.IsValid(common.RoomSelect) {
@@ -106,8 +133,8 @@ func ParseSelect(data []byte, isAidInRoom func(byte) bool) (*Select, error) {
 	}
 
 	winningAid := data[0x36]
-	// 0xff is the default value for winningAid when the track hasn't yet been decided.
-	if winningAid != 0xff && !isAidInRoom(winningAid) {
+	// NoAid is the default value for winningAid when the track hasn't yet been decided.
+	if winningAid != NoAid && !ctx.aidInRoom(winningAid) {
 		return nil, fmt.Errorf("winningAid invalid (%d)", winningAid)
 	}
 
@@ -129,4 +156,23 @@ func ParseSelect(data []byte, isAidInRoom func(byte) bool) (*Select, error) {
 		winningAid:       winningAid,
 		engineClass:      engineClass,
 	}, nil
+}
+
+// validatePlayerIdToAidMap checks a player id -> aid map. Each entry is an aid or NoAid,
+// and an aid can own at most two players (itself and a guest).
+func validatePlayerIdToAidMap(m [12]byte) error {
+	var counts [MaxAids]int
+	for playerId, aid := range m {
+		if aid == NoAid {
+			continue
+		}
+		if aid >= MaxAids {
+			return fmt.Errorf("player %d mapped to invalid aid (%d)", playerId, aid)
+		}
+		counts[aid]++
+		if counts[aid] > 2 {
+			return fmt.Errorf("aid %d mapped to more than 2 players", aid)
+		}
+	}
+	return nil
 }

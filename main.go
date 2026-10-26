@@ -8,6 +8,8 @@ import (
 	"syscall"
 
 	"mkw-server/controller"
+	"mkw-server/core"
+	"mkw-server/items"
 	"mkw-server/logging"
 	"mkw-server/talker"
 )
@@ -32,6 +34,15 @@ func main() {
 	// This is how mkw-server and wfc-server will communicate
 	wfcAddr := flag.String("wfc-addr", "", "TCP address (ip:port) of the WFC controller")
 
+	defaults := core.DefaultConfig()
+	kickThreshold := flag.Int("kick-threshold", defaults.KickThreshold, "Kick an aid after this many invalid packets within --kick-window (0 disables kicks)")
+	kickWindow := flag.Duration("kick-window", defaults.KickWindow, "Window for counting invalid packets towards a kick")
+
+	// Server-side item decisions need the client patch that asks mkw-server for items.
+	// See docs/server-item-decisions.md.
+	itemSlotPath := flag.String("item-slot", "", "Path to ItemSlot.bin. Enables server-side item decisions")
+	enforceItems := flag.Bool("enforce-items", false, "Drop packets whose items weren't granted by the server (requires --item-slot)")
+
 	flag.Parse()
 
 	// Validate required arguments
@@ -46,7 +57,30 @@ func main() {
 
 	logging.Log("Starting mkw-server. Room address=%s wfc-server address=%s\n", *roomAddr, *wfcAddr)
 
-	err = controller.CreateController(*roomAddr, *wfcAddr)
+	config := core.Config{
+		KickThreshold: *kickThreshold,
+		KickWindow:    *kickWindow,
+		EnforceItems:  *enforceItems,
+	}
+
+	if *itemSlotPath != "" {
+		slot, err := items.LoadItemSlot(*itemSlotPath)
+		if err != nil {
+			logging.Log("Failed to load ItemSlot.bin from %s: %v", *itemSlotPath, err)
+			os.Exit(1)
+		}
+		config.ItemEngine, err = items.NewEngine(slot, nil)
+		if err != nil {
+			logging.Log("Failed to create item engine: %v", err)
+			os.Exit(1)
+		}
+		logging.Log("Server-side item decisions enabled (enforce: %v)", *enforceItems)
+	} else if *enforceItems {
+		logging.Log("--enforce-items requires --item-slot")
+		os.Exit(1)
+	}
+
+	err = controller.CreateController(*roomAddr, *wfcAddr, config)
 
 	if err != nil {
 		logging.Log("Failed to initialize server: %v", err)

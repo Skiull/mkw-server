@@ -37,3 +37,11 @@ func ParseGameModeInfo(data uint32, r RecordIdx) (GameModeInfo, error) {
 		teamsBitfield:         teamsBitfield,
 	}, nil
 }
+
+func (g GameModeInfo) IsVSTeamOrCoinRunners() bool {
+	return g.isVSTeamOrCoinRunners
+}
+
+func (g GameModeInfo) TeamsBitfield() uint32 {
+	return g.teamsBitfield
+}

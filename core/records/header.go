@@ -9,13 +9,6 @@ import (
 
 const HeaderLen = 0x10
 
-// TODO: Move non-header record lenghts to their respective source files.
-const RaceDataLen = 0x40
-const UserLen = 0xc0
-const ItemLen = 0x8
-const EventMinLen = 0x18
-const EventMaxLen = 0xf8
-
 type Header struct {
 	magic         uint32
 	crc32         uint32
@@ -126,4 +119,20 @@ func (h *Header) RaceModeLen() byte {
 
 func (h *Header) RoomSelectLen() byte {
 	return h.roomSelectLen
+}
+
+func (h *Header) RaceDataLen() byte {
+	return h.raceDataLen
+}
+
+func (h *Header) UserLen() byte {
+	return h.userLen
+}
+
+func (h *Header) ItemLen() byte {
+	return h.itemLen
+}
+
+func (h *Header) EventLen() byte {
+	return h.eventLen
 }

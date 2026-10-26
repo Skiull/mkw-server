@@ -68,9 +68,9 @@ func handleAddAidRequest(req *AddAidRequest) error {
 		return errors.New("CreateUDPAddr returned nil")
 	}
 
-	err := core.AddAidToRoom(addr.String(), req.aid, req.hasGuest)
+	err := core.AddAidToRoom(addr.String(), req.aid, req.isHost, req.hasGuest)
 	if err != nil {
-		return fmt.Errorf(err.Error())
+		return err
 	}
 
 	logging.Log("Sending wfc-server AidAdded")

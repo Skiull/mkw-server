@@ -12,14 +12,14 @@ import (
 // currently it just feels like a wrapper
 
 // CreateController creates a new controller with the given room address and WFC address
-func CreateController(roomAddress string, wfcAddress string) error {
+func CreateController(roomAddress string, wfcAddress string, config core.Config) error {
 	udpAddr, err := net.ResolveUDPAddr("udp", roomAddress)
 	if err != nil {
-		logging.Log("Couldn't resolve udp address for room:", roomAddress)
+		logging.Log("Couldn't resolve udp address for room: %s", roomAddress)
 		return err
 	}
 
-	err = core.InitRoom(udpAddr)
+	err = core.InitRoom(udpAddr, config)
 	if err != nil {
 		logging.Log("Failed to initialize room: %v", err)
 		return err
@@ -36,6 +36,7 @@ func CreateController(roomAddress string, wfcAddress string) error {
 
 // Start starts the room and the WFC talker
 func Start() {
+	core.SetKickHandler(talker.NotifyAidKicked)
 	talker.Start()
 	core.StartRoom()
 }
