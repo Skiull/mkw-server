@@ -73,13 +73,21 @@ func TestColumn(t *testing.T) {
 	vs := func(rank, count int) int {
 		return Column(Request{Mode: common.ModeVS, Rank: rank, PlayerCount: count}, 12)
 	}
-	// 1st always gets 1st place odds and last always gets 12th place odds.
-	for count := 2; count <= 12; count++ {
-		if c := vs(1, count); c != 0 {
-			t.Fatalf("1st of %d -> column %d", count, c)
-		}
-		if c := vs(count, count); c != 11 {
-			t.Fatalf("last of %d -> column %d", count, c)
+	// Smaller rooms use a subset of the 12 player columns (Wexos's tables).
+	cases := []struct{ rank, count, want int }{
+		{1, 2, 0}, {2, 2, 3},
+		{3, 3, 5},
+		{4, 4, 8},
+		{5, 5, 9},
+		{6, 6, 10},
+		{7, 7, 11},
+		{2, 8, 1}, {8, 8, 11},
+		{5, 10, 5},
+		{6, 11, 6},
+	}
+	for _, c := range cases {
+		if got := vs(c.rank, c.count); got != c.want {
+			t.Fatalf("rank %d of %d -> column %d, want %d", c.rank, c.count, got, c.want)
 		}
 	}
 	for rank := 1; rank <= 12; rank++ {
@@ -87,8 +95,8 @@ func TestColumn(t *testing.T) {
 			t.Fatalf("12 players: rank %d -> column %d", rank, c)
 		}
 	}
-	// Ranks outside the room are clamped.
-	if c := vs(20, 6); c != 11 {
+	// Ranks outside the room are clamped to last place.
+	if c := vs(20, 6); c != 10 {
 		t.Fatalf("clamp -> %d", c)
 	}
 
@@ -105,7 +113,7 @@ func TestDecideFollowsWeights(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e, err := NewEngine(slot, map[common.ItemType]time.Duration{})
+	e, err := NewEngine(slot, &Limits{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,30 +134,94 @@ func TestDecideFollowsWeights(t *testing.T) {
 	}
 }
 
-func TestCooldownGivesMushroom(t *testing.T) {
+// twoItemSlot makes every column of every table give a or b with equal chance.
+func twoItemSlot(a, b common.ItemType) *ItemSlot {
 	slot := &ItemSlot{}
 	for range 12 {
 		table := Table{Chances: make([][rows]int, 12)}
 		for col := range table.Chances {
-			table.Chances[col][common.BlueShell] = 200
+			table.Chances[col][a] = 100
+			table.Chances[col][b] = 100
 		}
 		slot.Tables = append(slot.Tables, table)
 	}
-	e, err := NewEngine(slot, map[common.ItemType]time.Duration{common.BlueShell: 30 * time.Second})
+	return slot
+}
+
+// rollAll rolls n times and reports which items came out.
+func rollAll(t *testing.T, e *Engine, req Request, now time.Time, n int) map[common.ItemType]bool {
+	t.Helper()
+	seen := map[common.ItemType]bool{}
+	for range n {
+		item, err := e.Decide(req, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		seen[item] = true
+	}
+	return seen
+}
+
+func TestFirstAvailable(t *testing.T) {
+	e, err := NewEngine(twoItemSlot(common.Lightning, common.Star), &Limits{
+		FirstAvailable: map[common.ItemType]time.Duration{common.Lightning: 30 * time.Second},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	req := Request{Mode: common.ModeVS, Rank: 12, PlayerCount: 12, RaceTime: 25 * time.Second}
+	if seen := rollAll(t, e, req, time.Now(), 50); seen[common.Lightning] || !seen[common.Star] {
+		t.Fatalf("at 25s got %v, want only Star (rerolled, not Mushroom)", seen)
+	}
+	req.RaceTime = 31 * time.Second
+	if seen := rollAll(t, e, req, time.Now(), 50); !seen[common.Lightning] {
+		t.Fatalf("at 31s never got Lightning: %v", seen)
+	}
+}
 
-	req := Request{Mode: common.ModeVS, Rank: 12, PlayerCount: 12}
+func TestCooldown(t *testing.T) {
+	e, err := NewEngine(twoItemSlot(common.Blooper, common.Star), &Limits{
+		Cooldown: map[common.ItemType]time.Duration{common.Blooper: 15 * time.Second},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := Request{Mode: common.ModeVS, Rank: 12, PlayerCount: 12, RaceTime: time.Minute}
 	now := time.Now()
-	if item, _ := e.Decide(req, now); item != common.BlueShell {
-		t.Fatalf("first roll %v", item)
+	for range 100 {
+		if item, _ := e.Decide(req, now); item == common.Blooper {
+			break
+		}
 	}
-	if item, _ := e.Decide(req, now.Add(10*time.Second)); item != common.Mushroom {
-		t.Fatalf("roll during cooldown %v", item)
+	if seen := rollAll(t, e, req, now.Add(10*time.Second), 50); seen[common.Blooper] {
+		t.Fatal("Blooper pulled during its cooldown")
 	}
-	if item, _ := e.Decide(req, now.Add(31*time.Second)); item != common.BlueShell {
-		t.Fatalf("roll after cooldown %v", item)
+	if seen := rollAll(t, e, req, now.Add(16*time.Second), 50); !seen[common.Blooper] {
+		t.Fatal("Blooper never pulled after its cooldown")
+	}
+}
+
+func TestMaxInPlay(t *testing.T) {
+	e, err := NewEngine(twoItemSlot(common.ThunderCloud, common.Star), &Limits{
+		MaxInPlay: map[common.ItemType]int{common.ThunderCloud: 1, common.Star: 3},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := Request{Mode: common.ModeVS, Rank: 12, PlayerCount: 12, RaceTime: time.Minute,
+		InPlay: map[common.ItemObject]int{common.ObjThunderCloud: 1}}
+	if seen := rollAll(t, e, req, time.Now(), 50); seen[common.ThunderCloud] {
+		t.Fatal("second Thunder Cloud pulled")
+	}
+	// Nothing available: Mushroom.
+	req.InPlay[common.ObjStar] = 3
+	if seen := rollAll(t, e, req, time.Now(), 20); len(seen) != 1 || !seen[common.Mushroom] {
+		t.Fatalf("with nothing available got %v, want Mushroom", seen)
+	}
+	// Thunder Cloud is available again right after it's gone: no timer.
+	req.InPlay = nil
+	if seen := rollAll(t, e, req, time.Now(), 50); !seen[common.ThunderCloud] {
+		t.Fatal("Thunder Cloud never pulled once none were in play")
 	}
 }
 
@@ -157,5 +229,20 @@ func TestNewEngineNeedsOnlineTables(t *testing.T) {
 	slot, _ := ParseItemSlot(encode(6, 12, true)) // ItemSlotTable.slt has 6 tables.
 	if _, err := NewEngine(slot, nil); err == nil {
 		t.Fatal("engine accepted a file without online battle tables")
+	}
+}
+
+func TestNoThunderCloudWhileInvincible(t *testing.T) {
+	e := &Engine{limits: Limits{}, lastGranted: map[common.ItemType]time.Time{}}
+	req := Request{Mode: common.ModeVS, RaceTime: time.Minute}
+	if !e.Available(common.ThunderCloud, req, time.Now()) {
+		t.Fatal("Thunder Cloud unavailable normally")
+	}
+	req.Invincible = true
+	if e.Available(common.ThunderCloud, req, time.Now()) {
+		t.Fatal("Thunder Cloud available in a Star/Mega/Bullet")
+	}
+	if !e.Available(common.Mushroom, req, time.Now()) {
+		t.Fatal("other items blocked while invincible")
 	}
 }

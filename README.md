@@ -22,10 +22,16 @@ mkw-server is the WIP client server component of MKW-Server. Clients send [Race 
 
 ## wfc-server Messages
 
-Besides AddAid (`0x01`) and RemoveAid (`0x02`), mkw-server accepts KickAid (`0x03`, followed by ip u32 and port u16) to stop relaying an aid. When mkw-server kicks an aid on its own, it sends wfc-server AidKicked (`0x02`, followed by ip u32, port u16, aid u8 and reason u8, where reason `1` means invalid packets).
+Besides AddAid (`0x01`) and RemoveAid (`0x02`), mkw-server accepts KickAid (`0x03`, followed by ip u32 and port u16) to stop relaying an aid, and AddBot (`0x04`, same layout as AddAid) to add a test bot. When mkw-server kicks an aid on its own, it sends wfc-server AidKicked (`0x02`, followed by ip u32, port u16, aid u8 and reason u8, where reason `1` means invalid packets).
 
 ## Setup
 
 1. Set up [wfc-server](https://github.com/mkw-server/wfc-server). Refer to its README for setup instructions.
 2. Run `go build` to build the `mkw-server` executable.
 3. Add the path to the `mkw-server` executable in [wfc-server's config.xml](https://github.com/mkw-server/wfc-server). This allows wfc-server to locate and launch mkw-server instances.
+
+## Test Bots
+
+For testing a full room alone, set `<testBots>11</testBots>` in wfc-server's config. Every new room is then filled with bots played by mkw-server.
+
+Bots don't run game logic. Each one mirrors the room's real player: it copies their lobby and race state, uses its own aid, character, vehicle and friend code, and replays their RaceData from a few seconds earlier, so bots trail along the player's racing line. Bots never pick up or use items, never finish, and leave when the last real player does.

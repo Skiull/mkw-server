@@ -10,15 +10,48 @@ import (
 	"mkw-server/common"
 )
 
-// DefaultCooldowns are room-wide cooldowns after a strong item is handed out. While an
-// item is on cooldown, a roll that lands on it gives a Mushroom instead, like the game
-// does for its own item limits. Operators can tune these.
-var DefaultCooldowns = map[common.ItemType]time.Duration{
-	common.BlueShell:    30 * time.Second,
-	common.Lightning:    30 * time.Second,
-	common.POWBlock:     30 * time.Second,
-	common.Blooper:      15 * time.Second,
-	common.ThunderCloud: 30 * time.Second,
+// Limits are the game's item availability rules (source: Wexos's MKW item tool,
+// https://wexos.github.io/Tools/mkwitem.html). An item that isn't available is left out of
+// the roll and the remaining chances are rescaled, like the game does.
+type Limits struct {
+	// VS only: an item can't be pulled until the race clock reaches this.
+	FirstAvailable map[common.ItemType]time.Duration
+	// Room-wide: after an item is pulled, nobody can pull it again for this long.
+	Cooldown map[common.ItemType]time.Duration
+	// Room-wide: an item can't be pulled while this many of its object are in play.
+	MaxInPlay map[common.ItemType]int
+}
+
+var DefaultLimits = Limits{
+	FirstAvailable: map[common.ItemType]time.Duration{
+		common.BlueShell: 30 * time.Second,
+		common.Lightning: 30 * time.Second,
+		common.Blooper:   15 * time.Second,
+		common.POWBlock:  20 * time.Second,
+	},
+	Cooldown: map[common.ItemType]time.Duration{
+		common.Lightning: 30 * time.Second,
+		common.Blooper:   15 * time.Second,
+		common.POWBlock:  20 * time.Second,
+	},
+	// Thunder Cloud has no timer: it's available again as soon as the last one is gone.
+	MaxInPlay: map[common.ItemType]int{
+		common.GreenShell:     12,
+		common.RedShell:       8,
+		common.Banana:         16,
+		common.FakeItemBox:    6,
+		common.Mushroom:       12,
+		common.BobOmb:         3,
+		common.BlueShell:      1,
+		common.Lightning:      1,
+		common.Star:           3,
+		common.GoldenMushroom: 2,
+		common.MegaMushroom:   2,
+		common.Blooper:        1,
+		common.POWBlock:       1,
+		common.ThunderCloud:   1,
+		common.BulletBill:     1,
+	},
 }
 
 // Engine decides items for a room. Randomness comes from the server, so a client can't
@@ -26,11 +59,12 @@ var DefaultCooldowns = map[common.ItemType]time.Duration{
 type Engine struct {
 	slot        *ItemSlot
 	rng         *rand.Rand
-	cooldowns   map[common.ItemType]time.Duration
+	limits      Limits
 	lastGranted map[common.ItemType]time.Time
 }
 
-func NewEngine(slot *ItemSlot, cooldowns map[common.ItemType]time.Duration) (*Engine, error) {
+// NewEngine makes an engine. limits nil means DefaultLimits.
+func NewEngine(slot *ItemSlot, limits *Limits) (*Engine, error) {
 	for _, idx := range []int{TableOnlineVS, TableOnlineBalloonBattle, TableOnlineCoinRunners} {
 		if idx >= len(slot.Tables) {
 			return nil, fmt.Errorf("ItemSlot has %d tables, need table %d", len(slot.Tables), idx)
@@ -42,14 +76,14 @@ func NewEngine(slot *ItemSlot, cooldowns map[common.ItemType]time.Duration) (*En
 		return nil, err
 	}
 
-	if cooldowns == nil {
-		cooldowns = DefaultCooldowns
+	if limits == nil {
+		limits = &DefaultLimits
 	}
 
 	return &Engine{
 		slot:        slot,
 		rng:         rand.New(rand.NewChaCha8(seed)),
-		cooldowns:   cooldowns,
+		limits:      *limits,
 		lastGranted: make(map[common.ItemType]time.Time),
 	}, nil
 }
@@ -62,6 +96,13 @@ type Request struct {
 	PlayerCount int
 	// Battle: how many points/coins the player is behind the leader.
 	BehindLeader int
+	// VS: time since the race clock started, for Limits.FirstAvailable.
+	RaceTime time.Duration
+	// Room-wide count of each item object in play (held, trailing, or granted and not yet
+	// shown), for Limits.MaxInPlay.
+	InPlay map[common.ItemObject]int
+	// The player is in a Star, Mega Mushroom or Bullet Bill: no Thunder Cloud then.
+	Invincible bool
 }
 
 func tableFor(mode common.GameMode) (int, error) {
@@ -77,12 +118,27 @@ func tableFor(mode common.GameMode) (int, error) {
 	}
 }
 
+// vsRows lists, for each room size, which of the 12 position columns its positions use:
+// smaller rooms use a subset of the 12 player odds. From Wexos's item tool
+// (https://wexos.github.io/Tools/mkwitem.html); checked against the game's table.
+var vsRows = [...][]int{
+	2:  {0, 3},
+	3:  {0, 2, 5},
+	4:  {0, 2, 5, 8},
+	5:  {0, 2, 4, 6, 9},
+	6:  {0, 2, 4, 6, 8, 10},
+	7:  {0, 2, 4, 6, 8, 9, 11},
+	8:  {0, 1, 3, 5, 6, 8, 9, 11},
+	9:  {0, 1, 3, 4, 6, 7, 8, 10, 11},
+	10: {0, 1, 2, 4, 5, 6, 7, 9, 10, 11},
+	11: {0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11},
+	12: {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11},
+}
+
 // Column picks the table column for a request.
 //
-// VS tables have 12 columns, one per position in a 12 player room. Smaller rooms are
-// spread over all 12 so 1st always gets 1st place odds and last always gets 12th place
-// odds. The game resamples its tables for smaller rooms too; this is an approximation of
-// that until its exact formula is confirmed.
+// VS tables have 12 columns, one per position in a 12 player room; smaller rooms use the
+// subset in vsRows.
 //
 // Battle tables have 3 columns based on distance behind the leader (Balloon Battle:
 // <3, 3-5, >5 points; Coin Runners: <4, 4-7, >7 coins).
@@ -91,14 +147,10 @@ func Column(req Request, columns int) int {
 
 	switch req.Mode {
 	case common.ModeVS:
-		if req.PlayerCount <= 1 {
-			return 0
-		}
-		rank := max(1, min(req.Rank, req.PlayerCount))
-		// Rounded linear map of [1, PlayerCount] onto [0, columns-1].
-		num := (rank - 1) * (columns - 1)
-		den := req.PlayerCount - 1
-		return clamp((2*num + den) / (2 * den))
+		players := max(2, min(req.PlayerCount, len(vsRows)-1))
+		rows := vsRows[players]
+		rank := max(1, min(req.Rank, players))
+		return clamp(rows[rank-1])
 	case common.ModeBalloonBattle:
 		switch {
 		case req.BehindLeader < 3:
@@ -121,7 +173,8 @@ func Column(req Request, columns int) int {
 	return 0
 }
 
-// Decide rolls an item for a request.
+// Decide rolls an item for a request. Unavailable items are left out of the roll; if
+// nothing in the column is available the player gets a Mushroom.
 func (e *Engine) Decide(req Request, now time.Time) (common.ItemType, error) {
 	tableIdx, err := tableFor(req.Mode)
 	if err != nil {
@@ -130,42 +183,54 @@ func (e *Engine) Decide(req Request, now time.Time) (common.ItemType, error) {
 	table := &e.slot.Tables[tableIdx]
 	chances := table.Chances[Column(req, table.Columns())]
 
-	total := 0
-	for _, c := range chances {
+	total, available := 0, 0
+	var weights [common.ItemSlotRowCount]int
+	for i, c := range chances {
 		total += c
+		if c > 0 && e.Available(common.ItemType(i), req, now) {
+			weights[i] = c
+			available += c
+		}
 	}
 	if total == 0 {
 		return common.NoItem, fmt.Errorf("table %d column has no items", tableIdx)
 	}
 
-	roll := e.rng.IntN(total)
-	item := common.NoItem
-	for i, c := range chances {
-		if roll < c {
-			item = common.ItemType(i)
-			break
+	item := common.Mushroom
+	if available > 0 {
+		roll := e.rng.IntN(available)
+		for i, c := range weights {
+			if roll < c {
+				item = common.ItemType(i)
+				break
+			}
+			roll -= c
 		}
-		roll -= c
 	}
 
-	if e.onCooldown(item, now) {
-		item = common.Mushroom
-	}
-
-	if _, limited := e.cooldowns[item]; limited {
+	if _, limited := e.limits.Cooldown[item]; limited {
 		e.lastGranted[item] = now
 	}
-
 	return item, nil
 }
 
-func (e *Engine) onCooldown(item common.ItemType, now time.Time) bool {
-	cooldown, limited := e.cooldowns[item]
-	if !limited {
+// Available reports whether item can be pulled right now.
+func (e *Engine) Available(item common.ItemType, req Request, now time.Time) bool {
+	if item == common.ThunderCloud && req.Invincible {
 		return false
 	}
-	last, granted := e.lastGranted[item]
-	return granted && now.Sub(last) < cooldown
+	if first, ok := e.limits.FirstAvailable[item]; ok && req.Mode == common.ModeVS && req.RaceTime < first {
+		return false
+	}
+	if cooldown, ok := e.limits.Cooldown[item]; ok {
+		if last, granted := e.lastGranted[item]; granted && now.Sub(last) < cooldown {
+			return false
+		}
+	}
+	if limit, ok := e.limits.MaxInPlay[item]; ok && req.InPlay[item.Object()] >= limit {
+		return false
+	}
+	return true
 }
 
 // SeedForTest replaces the RNG with a deterministic one.

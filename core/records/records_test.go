@@ -353,3 +353,23 @@ func TestEventInvalid(t *testing.T) {
 	_, err = ParseEvent(d)
 	expectErr(t, err, "invalid object")
 }
+
+// A real friend code (3699-5411-5651) whose checksum is for RMCJ, sent in a record whose
+// region byte is E. It must be accepted.
+func TestUserFriendCodeFromOtherRegion(t *testing.T) {
+	d := validUser()
+	binary.BigEndian.PutUint64(d[0xa8:], 369954115651)
+	if _, err := ParseUser(d, soloCtx()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWorldPos(t *testing.T) {
+	enc := func(f float32) uint32 { return math.Float32bits(f+1e6) - 0x3f800000 }
+	// 0x9f42400 is 0.0 (positions are in 1/16 units around it).
+	r := RaceData{Position: [3]uint32{0x9f42400, enc(1234.5), enc(-20000)}}
+	p := r.WorldPos()
+	if p[0] != 0 || math.Abs(float64(p[1]-1234.5)) > 0.1 || math.Abs(float64(p[2]+20000)) > 0.1 {
+		t.Fatalf("WorldPos = %v", p)
+	}
+}

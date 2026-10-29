@@ -33,7 +33,11 @@ Both messages travel over the same UDP socket as Race packets.
 - **Table:** online VS (table 4), online Balloon Battle (10) or online Coin Runners (11), picked from the game mode in the player's latest RaceInfo.
 - **Column, VS:** the player's rank from their latest RaceData. Rooms with fewer than 12 players are spread across all 12 columns, so 1st always gets 1st-place odds and last always gets 12th-place odds. The game also resamples its tables for small rooms; this formula approximates that until the exact one is confirmed.
 - **Column, battle:** how far the player is behind the leader, using battle scores from RaceMode (Balloon Battle: <3, 3–5, >5 points; Coin Runners: <4, 4–7, >7 coins). Coin Runners' RaceMode layout isn't decoded yet, so coin counts are always 0 for now.
-- **Limits:** after a strong item is handed out, it goes on a room-wide cooldown (defaults in `items.DefaultCooldowns`: Blue Shell, Lightning, POW and Thunder Cloud 30s, Blooper 15s). A roll that lands on an item on cooldown gives a Mushroom, the same thing the game does when its own limits block an item.
+- **Limits:** `items.DefaultLimits`, from Wexos's item tool (https://wexos.github.io/Tools/mkwitem.html). An item that isn't available is left out of the roll and the other chances are rescaled; if nothing in the column is available the player gets a Mushroom.
+  - First available (VS race clock): Blue Shell and Lightning 30s, POW 20s, Blooper 15s. The server starts the clock 5s after it sees the countdown start, so it never runs early.
+  - Room-wide cooldown after a pull: Lightning 30s, POW 20s, Blooper 15s. Blue Shell and Thunder Cloud have none.
+  - Max in play: Green 12, Red 8, Banana 16, Fake Item Box 6, Mushroom 12, Bob-omb 3, Blue 1, Lightning 1, Star 3, Golden 2, Mega 2, Blooper 1, POW 1, Thunder Cloud 1, Bullet Bill 1. The server counts items held, trailed, or granted and not yet shown; items already on the track or flying aren't visible to it.
+  - A race's 16th, 18th, 20th and 21st+ item box per player always gives a Mushroom (the game's own rule, kept by the server). The game also swaps a pulled item for a Mushroom when its local view says too many are in play (the online "desync shroom"). The client replaces the game's roll with the server's item every frame, so neither happens with server items.
 - **Randomness:** each room's engine is seeded from `crypto/rand`.
 
 ## Enforcement
@@ -65,3 +69,15 @@ ItemSlot.bin comes from `/Race/Common.szs` on the game disc and isn't shipped wi
 - **Rank is reported by the client.** RaceData's rank is trusted, so a client could claim last place to get better items. Fixing this means computing positions on the server from RaceData positions and each course's checkpoints (KMP), which is a separate project.
 - **Item box contact isn't checked.** The server doesn't know where item boxes are, so it can't confirm the player actually touched one. The 1s minimum gap between grants and the one-item-at-a-time rule limit how much this can be abused.
 - **Item object ids** in EVENT records follow the community-documented `ItemObjId` order. If any turn out wrong, enforcement will flag legitimate items, so check logs with enforcement off before turning it on.
+
+## Item box checks
+
+With `--course-dir` pointing at the game's `/Race/Course` folder, mkw-server reads each course's item boxes from `course.kmp` (GOBJ objects 0x65 itembox and 0x76 s_itembox, plus the moving 0xC9 f_itembox, 0xD4 w_itembox, 0xD5 w_itemboxline and 0xEE sin_itembox, which are matched anywhere along their POTI route) and checks every item request against them:
+
+- The player's reported positions from the last 1.5s (RaceData; each coordinate is a float with its 4 low bits dropped) must come within 1200 units of a box. The radius is deliberately generous until it's tuned from real races; every request logs how close the player got.
+- The box must be there: a box someone took stays gone for its respawn time (150 frames = 2.5s by default, or 600/900 frames by setting 6). A take within 300ms counts for both players, since lag lets two players grab the same box in their own games.
+- Special boxes (setting 2) give their fixed item, e.g. Chain Chomp Roulette's center boxes: Star 95%, Mushroom 5%.
+
+Failed checks are only logged unless `--enforce-boxes` is set. Courses whose files are missing are skipped.
+
+- No Thunder Cloud for a player in a Star, Mega Mushroom or Bullet Bill (8 s, 8 s and 10 s after using one; a Lightning ends the Mega early). It's left out of the roll like any other unavailable item.

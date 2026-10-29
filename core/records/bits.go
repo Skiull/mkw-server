@@ -36,3 +36,16 @@ func readBits(data []byte, bitOffset, n int) uint32 {
 	r := &bitReader{data: data, pos: bitOffset}
 	return r.read(n)
 }
+
+// PutBits writes the low n bits of v at an absolute bit offset, MSB first.
+func PutBits(data []byte, bitOffset, n int, v uint32) {
+	for i := range n {
+		pos := bitOffset + i
+		mask := byte(1) << (7 - pos%8)
+		if v>>(n-1-i)&1 == 1 {
+			data[pos/8] |= mask
+		} else {
+			data[pos/8] &^= mask
+		}
+	}
+}

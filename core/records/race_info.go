@@ -117,6 +117,15 @@ func ParseRaceInfo(data []byte) (*RaceInfo, error) {
 	}, nil
 }
 
+func (r *RaceInfo) Course() common.Course {
+	return r.coursePlayed
+}
+
+// Frames since the race started, counted by the game (60 per second).
+func (r *RaceInfo) Frame() uint32 {
+	return r.countdownElapsedTime
+}
+
 func (r *RaceInfo) CountdownElapsedTime() uint32 {
 	return r.countdownElapsedTime
 }
@@ -132,4 +141,12 @@ func (r *RaceInfo) IsRacer() bool {
 // GameMode is the mode being played, derived from the course and game mode info.
 func (r *RaceInfo) GameMode() common.GameMode {
 	return common.GameModeFor(r.coursePlayed, r.gameModeInfo)
+}
+
+// Combo returns local player i's (0 or 1) vehicle and character.
+func (r *RaceInfo) Combo(i int) (common.Vehicle, common.Character) {
+	if i == 1 {
+		return r.p2Vehicle, r.p2Character
+	}
+	return r.p1Vehicle, r.p1Character
 }

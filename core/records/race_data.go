@@ -29,6 +29,40 @@ type RaceData struct {
 	data     [RaceDataLen]byte
 }
 
+// WorldPos is the player's position in course (KMP) units. From the community's protocol
+// docs (https://mkwiiki.org/wiki/Network_Protocol/RACEDATA): add 0x3f800000 to each 28 bit
+// value, read it as a float32, and subtract 1e6. Precision is 1/16 unit.
+func (r *RaceData) WorldPos() [3]float32 {
+	var p [3]float32
+	for i, v := range r.Position {
+		p[i] = math.Float32frombits(v+0x3f800000) - 1e6
+	}
+	return p
+}
+
+// HasPosition reports whether the record carries a real position. Before the player's kart
+// is placed at the start of a race, the position fields are all zero, which decodes to
+// about -1e6 on every axis.
+func (r *RaceData) HasPosition() bool {
+	return r.Position != [3]uint32{}
+}
+
+// Lakitu is set while Lakitu is rescuing the player, falling while they fall off the course.
+// Either way the player is about to be moved to a respawn point.
+func (r *RaceData) Respawning() bool {
+	return r.data[0x27]>>6&3 != 0 || r.data[0x27]&1 != 0
+}
+
+// CannonFlips flips with each cannon the player is shot out of.
+func (r *RaceData) CannonFlips() byte {
+	return byte(binary.BigEndian.Uint16(r.data[0x2f:]) >> 6 & 7)
+}
+
+// BulletBillFlip flips each time the player uses a Bullet Bill.
+func (r *RaceData) BulletBillFlip() byte {
+	return r.data[0x29] >> 5 & 1
+}
+
 func ParseRaceData(data []byte) (*RaceData, error) {
 	if len(data) != RaceDataLen {
 		return nil, fmt.Errorf("size mismatch (%d != %d)", len(data), RaceDataLen)
@@ -93,3 +127,31 @@ func ParseRaceDataRecords(data []byte, ctx *Context) ([]*RaceData, error) {
 	}
 	return out, nil
 }
+
+// Flags below are from https://mkwiiki.org/wiki/Network_Protocol/RACEDATA (bits numbered
+// from the most significant).
+
+// MushroomBoost is set from using a Mushroom until its boost is over.
+func (r *RaceData) MushroomBoost() bool { return r.data[0x29]>>6&1 != 0 }
+
+// MegaFlip flips each time the player uses a Mega Mushroom.
+func (r *RaceData) MegaFlip() byte { return r.data[0x29] & 1 }
+
+// StarFlip flips each time the player uses a Star.
+func (r *RaceData) StarFlip() byte { return r.data[0x2a] >> 7 & 1 }
+
+// MiniTurboFlip flips each time the player releases a mini-turbo (or a start boost).
+func (r *RaceData) MiniTurboFlip() byte { return r.data[0x28] >> 3 & 1 }
+
+// TrickFlip flips each time the player does a trick.
+func (r *RaceData) TrickFlip() byte { return r.data[0x2f] >> 5 & 1 }
+
+// ThwompFlip flips each time a Thwomp or a Toad's Factory press squishes the player.
+func (r *RaceData) ThwompFlip() byte { return r.data[0x2a] & 1 }
+
+// HitFlags holds the bits that flip when the player gets hit: by a Star or Mega user (or a
+// cow), a Fake Item Box, a Blue Shell or Bob-omb (full or half), or a Goomba.
+func (r *RaceData) HitFlags() byte { return r.data[0x2c] & 0xf2 }
+
+// BlueShellHitFlags holds the Blue Shell / Bob-omb hit bits (full and half).
+func (r *RaceData) BlueShellHitFlags() byte { return r.data[0x2c] & 0x30 }

@@ -21,11 +21,46 @@ type Player struct {
 	// Most recently granted item. Players can still be dragging it after it's left their
 	// item slot, so it stays allowed as a trailing item and in events.
 	lastItem common.ItemType
+	// When the last granted item was last seen held or trailing.
+	lastItemSeenAt time.Time
+	// The item granted before lastItem: a player can trail it while holding a new one.
+	prevItem common.ItemType
+	// Held and trailing items in the player's latest ITEM record.
+	held     common.ItemType
+	trailing common.ItemType
 	// Last item request sequence number and its answer, so a retransmitted request gets
 	// the same answer instead of a new roll.
 	lastRequestSeq  byte
 	lastRequestItem common.ItemType
 	hasRequested    bool
+	// Item boxes this player has been given an item for this race.
+	boxCount int
+	// Recent reported positions, for item box checks.
+	positions []timedPos
+	// When this player last drove through a leaf pile, which can drop an item.
+	leafPileAt time.Time
+	leafPile   int // Index of that pile in the course's LeafPiles.
+	// When this player last used a Mega Mushroom.
+	megaAt time.Time
+	// When this player last used a Star or Bullet Bill.
+	starAt, bulletAt time.Time
+	// The Bullet Bill looks over (back to driving speed); see checkMovement.
+	bulletEnded bool
+	shrink      shrinkLog // Speeds after a Lightning, for calibrating a shrunk limit.
+	// No-hit checks (hit_check.go).
+	hitFlags, blueHitFlags byte
+	hitFlagsSeen           bool
+	hitAt, rammedAt        time.Time
+	lastPos                [3]float32
+	lastPosAt              time.Time
+	// Vehicle and character from the latest RaceInfo, for offroad speed.
+	vehicle   common.Vehicle
+	character common.Character
+	// Movement check state.
+	move moveState
+	// Server-side race progress, and the course it's for.
+	progress       progressState
+	progressCourse common.Course
 }
 
 // itemGrant is an item the server handed to a player that hasn't been used up yet.
@@ -42,5 +77,11 @@ func newPlayer(aid byte, isGuest bool) *Player {
 		aid:      aid,
 		isGuest:  isGuest,
 		lastItem: common.NoItem,
+		prevItem: common.NoItem,
+		held:     common.NoItem,
+		trailing: common.NoItem,
+		progress: newProgress(),
+		// Not a course yet: the first RaceData starts fresh progress.
+		progressCourse: common.NoVote,
 	}
 }
