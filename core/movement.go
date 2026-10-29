@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"math"
 	"time"
 
 	"mkw-server/common"
@@ -82,6 +83,7 @@ type moveState struct {
 	squishSince                           uint32 // Frame a Thwomp squished the player, 0 if never.
 	squishNote                            string // Log-only squish violation for trackMovement.
 	comboNote                             string // Log-only combo speed violation.
+	driftSince                            uint32 // Frame the current drift started, 0 if not drifting.
 	lastComboLog                          time.Time
 	boostUntil                            uint32 // A boost may still be lifting the speed until this frame.
 	offroadSince                          uint32 // Start of the current offroad stretch, 0 if not on offroad.
@@ -122,6 +124,17 @@ func checkMovement(p *Player, frame uint32, rd *records.RaceData, walls *items.W
 	m.cannonFlips, m.bulletFlip, m.hasFlags = rd.CannonFlips(), rd.BulletBillFlip(), true
 	m.starFlip, m.megaFlip, m.mtFlip, m.trickFlip = rd.StarFlip(), rd.MegaFlip(), rd.MiniTurboFlip(), rd.TrickFlip()
 	m.thwompFlip = rd.ThwompFlip()
+	// A drift held for half a second or more ends in a mini-turbo (no reliable RACEDATA bit
+	// marks one, so the drift state is used: buttons 7/15 while drifting).
+	drifting := rd.Buttons == 7 || rd.Buttons == 15
+	if drifting && m.driftSince == 0 {
+		m.driftSince = frame
+	} else if !drifting && m.driftSince != 0 {
+		if frame-m.driftSince >= miniTurboMinDrift {
+			m.boostUntil = max(m.boostUntil, frame+miniTurboFrames)
+		}
+		m.driftSince = 0
+	}
 	if rd.MushroomBoost() {
 		m.boostUntil = max(m.boostUntil, frame+boostFrames)
 	}
@@ -180,8 +193,12 @@ func checkMovement(p *Player, frame uint32, rd *records.RaceData, walls *items.W
 				m.bulletEnded, p.bulletEnded = true, true
 			}
 		}
-		if limit, ok := comboSpeedLimit(m, frame, mega); ok && speed > limit {
-			m.comboNote = fmt.Sprintf("averaged %.0f u/f over %d frames with no boost (combo limit %.0f)", speed, frame-first.frame, limit)
+		// Horizontal speed only (falling adds vertical speed), and not in the air.
+		hspeed := float32(math.Hypot(float64(pos[0]-first.pos[0]), float64(pos[2]-first.pos[2]))) / float32(frame-first.frame)
+		// Going downhill, gravity adds speed past the engine's top speed (up to the 120 cap).
+		descent := (first.pos[1] - pos[1]) / float32(frame-first.frame)
+		if limit, ok := comboSpeedLimit(m, frame, mega); ok && hspeed > limit && descent <= maxComboDescent && !airborne(m.floors, pos) && !airborne(m.floors, first.pos) && !onStickyRoad(m.floors, pos) && !onStickyRoad(m.floors, first.pos) {
+			m.comboNote = fmt.Sprintf("averaged %.0f u/f over %d frames with no boost (combo limit %.0f)", hspeed, frame-first.frame, limit)
 		}
 		if limit, ok := squishLimit(m, first.frame, frame); ok && !mega && !(frame < m.bulletUntil && !m.bulletEnded) && speed > limit {
 			m.squishNote = fmt.Sprintf("averaged %.0f u/f over %d frames while squished (limit %.0f)", speed, frame-first.frame, limit)
@@ -325,7 +342,7 @@ func squishLimit(m *moveState, windowStart, frame uint32) (float32, bool) {
 }
 
 // Per-combo top speed (log only for now). Without a boost, a vehicle can't go faster than
-// its base speed stat (vehicle + character, kartParam/driverParam 0x18), plus 15% for a
+// its base speed stat (vehicle + character, kartParam/driverParam 0x18) x 1.15, plus 15% for a
 // bike's wheelie (Kinoko KartMove). Boosts lift it: Mushroom/boost panel x1.4, mini-turbo
 // x1.2, trick x1.3, and Star/Mega/Bullet Bill, all excluded via boostUntil and friends.
 // Slipstream (drafting) isn't visible in RACEDATA, which is why this is log only.
@@ -334,7 +351,12 @@ const (
 	comboSpeedSlack = 1.10
 	comboSpeedExtra = 5
 	comboAfterBoost = 60
-	miniTurboFrames = 200
+	// Full speed is the base stat times this (measured: 150cc top speed in test races was
+	// 1.15x the stat for karts).
+	engineSpeedFactor = 1.15
+	miniTurboMinDrift = 30
+	maxComboDescent   = 2 // u/f of height lost; steeper and the check is skipped.
+	miniTurboFrames   = 200
 )
 
 func comboSpeedLimit(m *moveState, frame uint32, mega bool) (float32, bool) {
@@ -350,5 +372,12 @@ func comboSpeedLimit(m *moveState, frame uint32, mega bool) (float32, bool) {
 	if items.IsBike(m.vehicle) {
 		mul += wheelieBonus
 	}
-	return base*mul*comboSpeedSlack + comboSpeedExtra, true
+	return base*engineSpeedFactor*mul*comboSpeedSlack + comboSpeedExtra, true
+}
+
+// onStickyRoad: sticky road (KCL 0x16, banked mine tracks on Wario's Gold Mine) keeps speed
+// through slopes and turns in ways the combo limit doesn't model.
+func onStickyRoad(f *items.Floors, pos [3]float32) bool {
+	ty, ok := f.At(pos)
+	return ok && ty == items.FloorStickyRoad
 }

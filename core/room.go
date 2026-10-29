@@ -46,6 +46,8 @@ type Config struct {
 	LearnFile      string
 	// Folder for race recordings (recorder.go). Empty: off.
 	RecordDir string
+	// Also record raw race-state bytes when they change (diagnostics).
+	RecordRaw bool
 	// Game hash challenges (challenge.go): where learned answers are kept, whether to learn
 	// them from the connected (clean!) clients, and whether to kick on a failed challenge.
 	ChallengeFile      string

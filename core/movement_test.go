@@ -3,10 +3,13 @@ package core
 import (
 	"encoding/binary"
 	"math"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"mkw-server/core/records"
+	"mkw-server/items"
 )
 
 // moveRec builds a RaceData record at pos. flags sets bytes by offset (Lakitu 0x27, Bullet
@@ -226,5 +229,37 @@ func TestComboSpeedLimit(t *testing.T) {
 	m := &moveState{}
 	if _, ok := comboSpeedLimit(m, 1000, false); ok {
 		t.Fatal("limit without stats")
+	}
+}
+
+func TestComboSpeedCatchesSpeedHack(t *testing.T) {
+	dir := os.Getenv("MKW_COURSE_DIR")
+	if dir == "" {
+		t.Skip("MKW_COURSE_DIR not set")
+	}
+	stats, err := items.LoadStats(filepath.Join(dir, "..", "Common.szs"))
+	if err != nil {
+		t.Skip(err)
+	}
+	run := func(factor float32) bool {
+		p := newPlayer(0, false)
+		p.move.floors, p.move.stats = items.NewTestFloors(items.FloorRoad, 100000), stats
+		p.move.vehicle, p.move.character = 7, 15 // The logging race's kart and character.
+		top := stats.BaseSpeed(7, 15) * engineSpeedFactor
+		x := float32(-50000)
+		for f := uint32(200); f < 500; f += 2 {
+			x += top * factor * 2
+			checkMovement(p, f, moveRec(t, [3]float32{x, 100, 500}, nil), nil, false)
+			if p.move.comboNote != "" {
+				return true
+			}
+		}
+		return false
+	}
+	if run(1.10) {
+		t.Fatal("10% over top speed flagged (within the slack)")
+	}
+	if !run(1.25) {
+		t.Fatal("25% over top speed with no boost not flagged")
 	}
 }

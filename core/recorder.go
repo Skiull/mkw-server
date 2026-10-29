@@ -35,6 +35,7 @@ type recording struct {
 	players map[[2]int]bool // aid, local player: "player" line written.
 	lastPos map[[2]int]time.Time
 	lastAt  time.Time
+	lastRaw map[[2]int]string // -record-raw: last state bytes per player.
 }
 
 // Guarded by mu.
@@ -63,7 +64,7 @@ func startRecording(course common.Course, now time.Time) {
 		return
 	}
 	rec = &recording{f: f, start: now, course: course,
-		players: map[[2]int]bool{}, lastPos: map[[2]int]time.Time{}, lastAt: now}
+		players: map[[2]int]bool{}, lastPos: map[[2]int]time.Time{}, lastAt: now, lastRaw: map[[2]int]string{}}
 	rec.write(map[string]any{"type": "race", "start": now.Format(time.RFC3339), "course": course, "room": room.addr.String()})
 	writeCourseOutline(dir, course)
 }
@@ -101,6 +102,15 @@ func recordPos(a *Aid, i int, p *Player, rd *records.RaceData, now time.Time) {
 		rec.players[key] = true
 		rec.write(map[string]any{"type": "player", "aid": a.aid, "p": i,
 			"friendCode": formatFriendCode(a.friendCode), "vehicle": p.vehicle, "character": p.character})
+	}
+	// Diagnostics (-record-raw): the state bytes 0x20-0x3f whenever they change, with the
+	// speed, to find which bits mark boosts.
+	if room.config.RecordRaw {
+		raw := fmt.Sprintf("%x", rd.Raw()[0x20:])
+		if raw != rec.lastRaw[key] {
+			rec.lastRaw[key] = raw
+			rec.write(map[string]any{"type": "raw", "t": rec.ms(now), "aid": a.aid, "p": i, "b20": raw, "speed": round1(p.move.lastSpeed)})
+		}
 	}
 	if now.Sub(rec.lastPos[key]) < recordPosInterval {
 		return

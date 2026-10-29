@@ -52,6 +52,7 @@ func main() {
 	kickChallengeFails := flag.Bool("kick-challenge-fails", false, "Kick (as cheating) clients that answer a game hash challenge wrong or not at all")
 	trustedPlayers := flag.String("trusted-players", "", "Comma-separated friend codes or profile IDs whose clients are trusted: their game hashes, challenge answers and data blocks are learned")
 	learnFile := flag.String("learn-file", "", "JSON file for values learned from trusted players (wfc-server reads its login hashes)")
+	recordRaw := flag.Bool("record-raw", false, "Diagnostics: also record raw race-state bytes whenever they change")
 	recordDir := flag.String("record-dir", "", "Folder to save race recordings in (positions, items, flags per race)")
 	kickNoHit := flag.Bool("kick-no-hit", false, "Kick (as cheating) players who don't take a hit the server is sure of (rams, Lightning, Blue Shells, tracked Bananas and Fake Item Boxes)")
 	kickDataCheats := flag.Bool("kick-data-cheats", false, "Kick (as cheating) clients whose StaticR.rel .data changed outside --mutable-data-blocks")
@@ -139,6 +140,7 @@ func main() {
 	config.KickDataCheats = *kickDataCheats
 	config.KickNoHit = *kickNoHit
 	config.RecordDir = *recordDir
+	config.RecordRaw = *recordRaw
 	if *trustedPlayers != "" {
 		trusted, err := core.ParseTrustedPlayers(*trustedPlayers)
 		if err != nil {

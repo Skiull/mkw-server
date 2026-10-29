@@ -155,3 +155,6 @@ func (r *RaceData) HitFlags() byte { return r.data[0x2c] & 0xf2 }
 
 // BlueShellHitFlags holds the Blue Shell / Bob-omb hit bits (full and half).
 func (r *RaceData) BlueShellHitFlags() byte { return r.data[0x2c] & 0x30 }
+
+// Raw returns the record's bytes (for diagnostics).
+func (r *RaceData) Raw() []byte { return r.data[:] }
