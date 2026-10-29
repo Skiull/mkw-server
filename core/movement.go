@@ -82,7 +82,8 @@ type moveState struct {
 	lastSquishLog                         time.Time
 	squishSince                           uint32 // Frame a Thwomp squished the player, 0 if never.
 	squishNote                            string // Log-only squish violation for trackMovement.
-	comboNote                             string // Log-only combo speed violation.
+	comboNote                             string // Combo speed violation for trackMovement.
+	course                                *items.Course
 	driftSince                            uint32 // Frame the current drift started, 0 if not drifting.
 	lastComboLog                          time.Time
 	boostUntil                            uint32 // A boost may still be lifting the speed until this frame.
@@ -197,7 +198,7 @@ func checkMovement(p *Player, frame uint32, rd *records.RaceData, walls *items.W
 		hspeed := float32(math.Hypot(float64(pos[0]-first.pos[0]), float64(pos[2]-first.pos[2]))) / float32(frame-first.frame)
 		// Going downhill, gravity adds speed past the engine's top speed (up to the 120 cap).
 		descent := (first.pos[1] - pos[1]) / float32(frame-first.frame)
-		if limit, ok := comboSpeedLimit(m, frame, mega); ok && hspeed > limit && descent <= maxComboDescent && !airborne(m.floors, pos) && !airborne(m.floors, first.pos) && !onStickyRoad(m.floors, pos) && !onStickyRoad(m.floors, first.pos) {
+		if limit, ok := comboSpeedLimit(m, frame, mega); ok && hspeed > limit && descent <= maxComboDescent && !airborne(m.floors, pos) && !airborne(m.floors, first.pos) && !onStickyRoad(m.floors, pos) && !onStickyRoad(m.floors, first.pos) && !(m.course != nil && m.course.NearBelt(pos)) {
 			m.comboNote = fmt.Sprintf("averaged %.0f u/f over %d frames with no boost (combo limit %.0f)", hspeed, frame-first.frame, limit)
 		}
 		if limit, ok := squishLimit(m, first.frame, frame); ok && !mega && !(frame < m.bulletUntil && !m.bulletEnded) && speed > limit {
@@ -250,9 +251,9 @@ func trackMovement(a *Aid, pkt *RacePacket, now time.Time) {
 			walls = c.Walls
 		}
 		mega := !p.megaAt.IsZero() && now.Sub(p.megaAt) <= megaDuration
-		p.move.floors = nil
+		p.move.floors, p.move.course = nil, nil
 		if c := room.config.Courses[a.course]; c != nil {
-			p.move.floors = c.Floors
+			p.move.floors, p.move.course = c.Floors, c
 		}
 		p.move.stats, p.move.vehicle, p.move.character = room.config.Stats, p.vehicle, p.character
 		problem := checkMovement(p, frame, rd, walls, mega)
@@ -260,6 +261,12 @@ func trackMovement(a *Aid, pkt *RacePacket, now time.Time) {
 		trackShrinkSpeed(a, p, now)
 		if note := p.move.comboNote; note != "" {
 			p.move.comboNote = ""
+			if room.config.EnforceMovement {
+				if movementViolation(a, p, i, "combo speed: "+note, now) {
+					return
+				}
+				continue
+			}
 			if now.Sub(p.move.lastComboLog) >= moveLogInterval {
 				p.move.lastComboLog = now
 				logging.Log("Aid %d player %d combo speed check failed (not enforced): %s", a.aid, i, note)
@@ -341,11 +348,11 @@ func squishLimit(m *moveState, windowStart, frame uint32) (float32, bool) {
 	return 120*squishSpeedFactor*offroadSlack + offroadExtraSpeed, true
 }
 
-// Per-combo top speed (log only for now). Without a boost, a vehicle can't go faster than
+// Per-combo top speed (a movement violation with -enforce-movement). Without a boost, a vehicle can't go faster than
 // its base speed stat (vehicle + character, kartParam/driverParam 0x18) x 1.15, plus 15% for a
 // bike's wheelie (Kinoko KartMove). Boosts lift it: Mushroom/boost panel x1.4, mini-turbo
 // x1.2, trick x1.3, and Star/Mega/Bullet Bill, all excluded via boostUntil and friends.
-// Slipstream (drafting) isn't visible in RACEDATA, which is why this is log only.
+// Slipstream (drafting) isn't visible in RACEDATA; legit races showed none over the limit.
 const (
 	wheelieBonus    = 0.15
 	comboSpeedSlack = 1.10
@@ -375,9 +382,11 @@ func comboSpeedLimit(m *moveState, frame uint32, mega bool) (float32, bool) {
 	return base*engineSpeedFactor*mul*comboSpeedSlack + comboSpeedExtra, true
 }
 
-// onStickyRoad: sticky road (KCL 0x16, banked mine tracks on Wario's Gold Mine) keeps speed
-// through slopes and turns in ways the combo limit doesn't model.
+// onStickyRoad: floors that add speed the combo limit doesn't model: sticky road (KCL
+// 0x16, banked mine tracks on Wario's Gold Mine) keeps speed through slopes and turns, and
+// moving and rotating roads (conveyors, escalators) add their own speed to the player's.
+// Toad's Factory's belts are objects, not KCL: near them it's skipped too.
 func onStickyRoad(f *items.Floors, pos [3]float32) bool {
 	ty, ok := f.At(pos)
-	return ok && ty == items.FloorStickyRoad
+	return ok && (ty == items.FloorStickyRoad || ty == items.FloorMovingRoad || ty == items.FloorRotatingRoad)
 }
