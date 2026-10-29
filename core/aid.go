@@ -49,6 +49,8 @@ type Aid struct {
 	// Last reported set of changed .data blocks (data_check.go), to log changes once.
 	dataChangesSeen string
 	challenge       challengeState
+	// Logged-in profile ID from wfc-server (trust.go). 0 if unknown.
+	profileID uint32
 
 	// Set for test bots, which the server plays itself.
 	bot *botState

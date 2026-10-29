@@ -75,6 +75,7 @@ func kick(a *Aid, reason KickReason) {
 	a.kicked = true
 	a.readyForCountdown = false
 	logging.Log("Kicked aid %d (%s): %s", a.aid, a.addr, reason)
+	recordFlag(a, fmt.Sprintf("kicked: %v", reason), time.Now())
 
 	// Remaining aids may now agree on the countdown state.
 	tryUpdateRoomCountdownState()

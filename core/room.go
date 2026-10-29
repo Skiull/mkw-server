@@ -41,6 +41,11 @@ type Config struct {
 	KickDataCheats bool
 	// Kick players who don't take a hit the server is sure of (hit_check.go).
 	KickNoHit bool
+	// Trusted players by profile ID, and where learned values go (trust.go).
+	TrustedPlayers map[uint32]bool
+	LearnFile      string
+	// Folder for race recordings (recorder.go). Empty: off.
+	RecordDir string
 	// Game hash challenges (challenge.go): where learned answers are kept, whether to learn
 	// them from the connected (clean!) clients, and whether to kick on a failed challenge.
 	ChallengeFile      string
@@ -180,6 +185,9 @@ func handlePacket(addr net.Addr, data []byte, now time.Time) []net.Addr {
 	case isItemRequestPacket(data):
 		handleItemRequest(a, data, now)
 		return nil
+	case isLoginHashPacket(data):
+		handleLoginHash(a, data)
+		return nil
 	case isGameHashPacket(data):
 		handleGameHash(a, data, now)
 		return nil
@@ -217,6 +225,7 @@ func handlePacket(addr net.Addr, data []byte, now time.Time) []net.Addr {
 				return nil
 			}
 			logging.Log("Aid %d item violation (not enforced): %v", a.aid, err)
+			recordFlag(a, "item violation: "+err.Error(), now)
 		}
 	}
 
@@ -274,6 +283,9 @@ func trackPlayerState(a *Aid, pkt *RacePacket, now time.Time) {
 	if pkt.RaceInfo != nil {
 		started := pkt.IsCountdownStarted()
 		if started && !a.raceStarted {
+			if a.bot == nil && (rec == nil || now.Sub(rec.start) > 20*time.Second) {
+				startRecording(pkt.RaceInfo.Course(), now)
+			}
 			resetItemState(a)
 			resetMovement(a)
 			resetHitChecks()

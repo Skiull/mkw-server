@@ -47,6 +47,9 @@ func handleDataChanges(a *Aid, data []byte, now time.Time) {
 		strike(a, "malformed .data report", now)
 		return
 	}
+	if isTrusted(a) {
+		learnDataBlocks(a, changed)
+	}
 	var unexpected []int
 	for _, b := range changed {
 		if !room.config.MutableDataBlocks[b] {

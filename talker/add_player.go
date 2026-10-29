@@ -18,10 +18,12 @@ type AddAidRequest struct {
 	isHost   bool
 	searchId uint64
 	hasGuest bool
+	// The player's logged-in profile ID from wfc-server (0 if unknown).
+	profileID uint32
 }
 
 // TODO: Shouldn't need to update this everytime a field is added, it should be automatic.
-const AddAidRequestLength = 17
+const AddAidRequestLength = 21
 
 // Id: ResponseToWFCServer.JoinAccepted (0x01)
 type JoinAcceptedResponse struct {
@@ -34,12 +36,13 @@ func unpackAddAidRequest(msg []byte) (*AddAidRequest, error) {
 	}
 
 	return &AddAidRequest{
-		ip:       binary.BigEndian.Uint32(msg[0:4]),
-		port:     binary.BigEndian.Uint16(msg[4:6]),
-		aid:      uint8(msg[6]),
-		isHost:   msg[7] == 1,
-		searchId: binary.BigEndian.Uint64(msg[8:16]),
-		hasGuest: msg[16] == 1,
+		ip:        binary.BigEndian.Uint32(msg[0:4]),
+		port:      binary.BigEndian.Uint16(msg[4:6]),
+		aid:       uint8(msg[6]),
+		isHost:    msg[7] == 1,
+		searchId:  binary.BigEndian.Uint64(msg[8:16]),
+		hasGuest:  msg[16] == 1,
+		profileID: binary.BigEndian.Uint32(msg[17:21]),
 	}, nil
 }
 
@@ -72,6 +75,7 @@ func handleAddAidRequest(req *AddAidRequest) error {
 	if err != nil {
 		return err
 	}
+	core.SetAidProfile(addr.String(), req.profileID)
 
 	logging.Log("Sending wfc-server AidAdded")
 

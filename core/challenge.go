@@ -124,7 +124,7 @@ func stepChallenge(a *Aid, now time.Time) {
 			return
 		}
 		c.pending = false
-		if !room.config.LearnChallenges {
+		if !learningChallenges(a) {
 			c.unanswered++
 			logging.Log("Aid %d didn't answer game hash challenge %d (%d in a row)", a.aid, c.seed, c.unanswered)
 			if c.unanswered >= challengeMaxUnanswer && room.config.KickChallengeFails {
@@ -138,7 +138,7 @@ func stepChallenge(a *Aid, now time.Time) {
 	}
 	known := challengeAnswers[a.gameHash]
 	switch {
-	case room.config.LearnChallenges:
+	case learningChallenges(a):
 		if !c.learning {
 			c.learning = true
 			for range challengeSeeds - len(known) {
@@ -179,7 +179,7 @@ func handleChallengeReply(a *Aid, data []byte) {
 		return // Late or duplicate.
 	}
 	c.pending, c.unanswered = false, 0
-	if room.config.LearnChallenges {
+	if learningChallenges(a) {
 		if challengeAnswers[a.gameHash] == nil {
 			challengeAnswers[a.gameHash] = map[uint32]uint64{}
 		}
@@ -201,4 +201,14 @@ func handleChallengeReply(a *Aid, data []byte) {
 	if room.config.KickChallengeFails {
 		kick(a, KickCheating)
 	}
+}
+
+// learningChallenges reports whether the aid's answers are learned instead of checked:
+// in learn mode, or from a trusted player while their build isn't fully learned.
+// Caller must hold mu.
+func learningChallenges(a *Aid) bool {
+	if room.config.LearnChallenges {
+		return true
+	}
+	return room.config.ChallengeFile != "" && isTrusted(a) && len(challengeAnswers[a.gameHash]) < challengeSeeds
 }

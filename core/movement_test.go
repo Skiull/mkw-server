@@ -221,3 +221,10 @@ func TestStarEndsSquish(t *testing.T) {
 		t.Fatalf("squish still applied after a Star: %q", p.move.squishNote)
 	}
 }
+
+func TestComboSpeedLimit(t *testing.T) {
+	m := &moveState{}
+	if _, ok := comboSpeedLimit(m, 1000, false); ok {
+		t.Fatal("limit without stats")
+	}
+}

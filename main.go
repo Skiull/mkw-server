@@ -50,6 +50,9 @@ func main() {
 	challengeFile := flag.String("challenge-file", "", "File of learned game hash challenge answers (enables challenges)")
 	learnChallenges := flag.Bool("learn-challenges", false, "Learn challenge answers from connected clients. Only with a clean client!")
 	kickChallengeFails := flag.Bool("kick-challenge-fails", false, "Kick (as cheating) clients that answer a game hash challenge wrong or not at all")
+	trustedPlayers := flag.String("trusted-players", "", "Comma-separated friend codes or profile IDs whose clients are trusted: their game hashes, challenge answers and data blocks are learned")
+	learnFile := flag.String("learn-file", "", "JSON file for values learned from trusted players (wfc-server reads its login hashes)")
+	recordDir := flag.String("record-dir", "", "Folder to save race recordings in (positions, items, flags per race)")
 	kickNoHit := flag.Bool("kick-no-hit", false, "Kick (as cheating) players who don't take a hit the server is sure of (rams, Lightning, Blue Shells, tracked Bananas and Fake Item Boxes)")
 	kickDataCheats := flag.Bool("kick-data-cheats", false, "Kick (as cheating) clients whose StaticR.rel .data changed outside --mutable-data-blocks")
 	kickHashCheats := flag.Bool("kick-hash-cheats", false, "Kick clients whose game hash isn't in --game-hashes, telling them to update")
@@ -135,6 +138,22 @@ func main() {
 	}
 	config.KickDataCheats = *kickDataCheats
 	config.KickNoHit = *kickNoHit
+	config.RecordDir = *recordDir
+	if *trustedPlayers != "" {
+		trusted, err := core.ParseTrustedPlayers(*trustedPlayers)
+		if err != nil {
+			logging.Log("%v", err)
+			os.Exit(1)
+		}
+		config.TrustedPlayers = trusted
+	}
+	if *learnFile != "" {
+		if err := core.LoadLearned(*learnFile, &config); err != nil {
+			logging.Log("Failed to load %s: %v", *learnFile, err)
+			os.Exit(1)
+		}
+		config.LearnFile = *learnFile
+	}
 	if *challengeFile != "" {
 		if err := core.LoadChallenges(*challengeFile); err != nil {
 			logging.Log("Failed to load %s: %v", *challengeFile, err)

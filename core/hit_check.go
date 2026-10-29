@@ -168,6 +168,7 @@ func resolveHits(now time.Time) (missed []*hitExpectation) {
 			logging.Log("Aid %d player %d possible no-hit code: %s, but no hit flag and speed only fell %.0f -> %.0f u/f",
 				e.aid.aid, playerIndex(e.aid, p), e.reason, e.speedAt, e.minSpeed)
 			missed = append(missed, e)
+			recordFlag(e.aid, "possible no-hit: "+e.reason, now)
 			if room.config.KickNoHit && !e.aid.kicked {
 				logging.Log("Aid %d no-hit cheat: %s", e.aid.aid, e.reason)
 				kick(e.aid, KickCheating)

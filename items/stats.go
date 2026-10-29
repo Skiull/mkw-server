@@ -20,11 +20,14 @@ type Stats struct {
 	// By vehicle ID: Mega Mushroom scale (multiplies the 120 u/f cap, 1.55-2.70) and
 	// shocked scale (size when shrunk, 0.40-0.70).
 	megaScale, shockScale []float32
+	// Base speed stat (u/f) by vehicle ID and by driverParam entry (a bonus).
+	kartSpeed, driverSpeed []float32
 }
 
 const (
 	paramEntryLen   = 0x18c
 	paramKCLSpeed   = 0x70
+	paramSpeed      = 0x18
 	paramMegaScale  = 0x184
 	paramShockScale = 0x188
 	driverMiiEntry  = 24 // Mii entries in driverParam.bin start here.
@@ -51,6 +54,12 @@ func LoadStats(path string) (*Stats, error) {
 		return nil, err
 	}
 	if s.shockScale, err = readParamFloat(data, "kartParam.bin", paramShockScale); err != nil {
+		return nil, err
+	}
+	if s.kartSpeed, err = readParamFloat(data, "kartParam.bin", paramSpeed); err != nil {
+		return nil, err
+	}
+	if s.driverSpeed, err = readParamFloat(data, "driverParam.bin", paramSpeed); err != nil {
 		return nil, err
 	}
 	if s.driver, err = readParam(data, "driverParam.bin"); err != nil {
@@ -157,3 +166,22 @@ func pick(s *Stats, v common.Vehicle, field func(*Stats) []float32, fallback fun
 	}
 	return fallback(vs)
 }
+
+// BaseSpeed is a combo's top speed without boosts (vehicle plus character bonus), in u/f.
+// An unknown vehicle or character gets the fastest of any.
+func (s *Stats) BaseSpeed(v common.Vehicle, c common.Character) float32 {
+	if s == nil {
+		return 0
+	}
+	kart := pick(s, v, func(s *Stats) []float32 { return s.kartSpeed }, maxOf)
+	var driver float32
+	if int(c) < driverMiiEntry {
+		driver = s.driverSpeed[c]
+	} else {
+		driver = maxOf(s.driverSpeed)
+	}
+	return kart + driver
+}
+
+// IsBike reports whether a vehicle is a bike (vehicle IDs 18-35), which can wheelie.
+func IsBike(v common.Vehicle) bool { return v >= 18 && v < 36 }

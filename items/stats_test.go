@@ -43,4 +43,11 @@ func TestRealStats(t *testing.T) {
 	if lo < 1.5 || hi > 2.75 || hi < 2.6 {
 		t.Errorf("Mega scales %.2f-%.2f, want about 1.55-2.70", lo, hi)
 	}
+	// Base speed: vehicle stat plus character bonus (Funky Kong +1.06).
+	if got := s.BaseSpeed(common.FlameRunner, common.FunkyKong); got < 83.9 || got > 84.1 {
+		t.Errorf("Flame Runner + Funky Kong base speed %.2f, want about 84.0 (82.95 + 1.06)", got)
+	}
+	if !IsBike(common.FlameRunner) || IsBike(common.StandardKartM) {
+		t.Error("bike detection wrong")
+	}
 }

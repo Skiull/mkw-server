@@ -81,6 +81,8 @@ type moveState struct {
 	lastSquishLog                         time.Time
 	squishSince                           uint32 // Frame a Thwomp squished the player, 0 if never.
 	squishNote                            string // Log-only squish violation for trackMovement.
+	comboNote                             string // Log-only combo speed violation.
+	lastComboLog                          time.Time
 	boostUntil                            uint32 // A boost may still be lifting the speed until this frame.
 	offroadSince                          uint32 // Start of the current offroad stretch, 0 if not on offroad.
 	offroadType                           uint8  // Lightest offroad in the current stretch.
@@ -109,7 +111,11 @@ func checkMovement(p *Player, frame uint32, rd *records.RaceData, walls *items.W
 		if rd.ThwompFlip() != m.thwompFlip {
 			m.squishSince = frame
 		}
-		if rd.MiniTurboFlip() != m.mtFlip || rd.TrickFlip() != m.trickFlip {
+		if rd.MiniTurboFlip() != m.mtFlip {
+			// A super mini-turbo lasts up to 3x the vehicle's mini-turbo stat.
+			m.boostUntil = max(m.boostUntil, frame+miniTurboFrames)
+		}
+		if rd.TrickFlip() != m.trickFlip {
 			m.boostUntil = max(m.boostUntil, frame+boostFrames)
 		}
 	}
@@ -174,6 +180,9 @@ func checkMovement(p *Player, frame uint32, rd *records.RaceData, walls *items.W
 				m.bulletEnded, p.bulletEnded = true, true
 			}
 		}
+		if limit, ok := comboSpeedLimit(m, frame, mega); ok && speed > limit {
+			m.comboNote = fmt.Sprintf("averaged %.0f u/f over %d frames with no boost (combo limit %.0f)", speed, frame-first.frame, limit)
+		}
 		if limit, ok := squishLimit(m, first.frame, frame); ok && !mega && !(frame < m.bulletUntil && !m.bulletEnded) && speed > limit {
 			m.squishNote = fmt.Sprintf("averaged %.0f u/f over %d frames while squished (limit %.0f)", speed, frame-first.frame, limit)
 		}
@@ -230,7 +239,16 @@ func trackMovement(a *Aid, pkt *RacePacket, now time.Time) {
 		}
 		p.move.stats, p.move.vehicle, p.move.character = room.config.Stats, p.vehicle, p.character
 		problem := checkMovement(p, frame, rd, walls, mega)
+		recordPos(a, i, p, rd, now)
 		trackShrinkSpeed(a, p, now)
+		if note := p.move.comboNote; note != "" {
+			p.move.comboNote = ""
+			if now.Sub(p.move.lastComboLog) >= moveLogInterval {
+				p.move.lastComboLog = now
+				logging.Log("Aid %d player %d combo speed check failed (not enforced): %s", a.aid, i, note)
+				recordFlag(a, "combo speed (not enforced): "+note, now)
+			}
+		}
 		if note := p.move.squishNote; note != "" {
 			p.move.squishNote = ""
 			if room.config.EnforceMovement {
@@ -270,6 +288,7 @@ func movementViolation(a *Aid, p *Player, i int, problem string, now time.Time) 
 		return false
 	}
 	logging.Log("Aid %d player %d movement violation %d/%d this race: %s", a.aid, i, p.move.violations, movementViolationsBeforeKick, problem)
+	recordFlag(a, "movement violation: "+problem, now)
 	if p.move.violations >= movementViolationsBeforeKick {
 		kick(a, KickCheating)
 		return true
@@ -303,4 +322,33 @@ func squishLimit(m *moveState, windowStart, frame uint32) (float32, bool) {
 		return 0, false
 	}
 	return 120*squishSpeedFactor*offroadSlack + offroadExtraSpeed, true
+}
+
+// Per-combo top speed (log only for now). Without a boost, a vehicle can't go faster than
+// its base speed stat (vehicle + character, kartParam/driverParam 0x18), plus 15% for a
+// bike's wheelie (Kinoko KartMove). Boosts lift it: Mushroom/boost panel x1.4, mini-turbo
+// x1.2, trick x1.3, and Star/Mega/Bullet Bill, all excluded via boostUntil and friends.
+// Slipstream (drafting) isn't visible in RACEDATA, which is why this is log only.
+const (
+	wheelieBonus    = 0.15
+	comboSpeedSlack = 1.10
+	comboSpeedExtra = 5
+	comboAfterBoost = 60
+	miniTurboFrames = 200
+)
+
+func comboSpeedLimit(m *moveState, frame uint32, mega bool) (float32, bool) {
+	// Speed falls back gradually after a boost: wait a second after one ends.
+	if m.stats == nil || frame < m.boostUntil+comboAfterBoost || mega || (frame < m.bulletUntil && !m.bulletEnded) {
+		return 0, false
+	}
+	base := m.stats.BaseSpeed(m.vehicle, m.character)
+	if base == 0 {
+		return 0, false
+	}
+	mul := float32(1)
+	if items.IsBike(m.vehicle) {
+		mul += wheelieBonus
+	}
+	return base*mul*comboSpeedSlack + comboSpeedExtra, true
 }

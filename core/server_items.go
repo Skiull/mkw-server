@@ -131,6 +131,7 @@ func decideItem(engine *items.Engine, a *Aid, p *Player, now time.Time) (common.
 	}
 
 	p.grant = &itemGrant{item: item, grantedAt: now}
+	recordItem(a, p.index(a), "granted", item, now)
 	p.prevItem = p.lastItem
 	p.lastItem = item
 	return item, ""
@@ -232,6 +233,14 @@ func observeItems(a *Aid, pkt *RacePacket, now time.Time) error {
 	for i, slot := range pkt.Event.Slots {
 		if hadPrev && pkt.Event.RawSlots[i] == prev[i] {
 			continue
+		}
+		switch slot.Action {
+		case common.EventUsed:
+			recordItem(a, 0, "used", slot.Object, now)
+		case common.EventShot:
+			recordItem(a, 0, "threw", slot.Object, now)
+		case common.EventHitFree, common.EventHitDragged:
+			recordItem(a, 0, "hit", slot.Object, now)
 		}
 		if slot.Action == common.EventShot {
 			if shot, ok := pkt.Event.ShotAt(i); ok {
