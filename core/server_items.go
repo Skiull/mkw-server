@@ -374,6 +374,7 @@ func lightningStruck(user *Aid) {
 		}
 		for _, p := range a.players {
 			startShrinkLog(a, p, time.Now())
+			startShock(p, now)
 			p.megaAt = time.Time{}
 		}
 	}

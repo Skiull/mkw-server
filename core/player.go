@@ -44,6 +44,8 @@ type Player struct {
 	megaAt time.Time
 	// When this player last used a Star or Bullet Bill.
 	starAt, bulletAt time.Time
+	// A Lightning shrink (shrink.go): when it hit and when it wears off.
+	shockFrom, shockUntil time.Time
 	// The Bullet Bill looks over (back to driving speed); see checkMovement.
 	bulletEnded bool
 	shrink      shrinkLog // Speeds after a Lightning, for calibrating a shrunk limit.

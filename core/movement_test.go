@@ -263,3 +263,36 @@ func TestComboSpeedCatchesSpeedHack(t *testing.T) {
 		t.Fatal("25% over top speed with no boost not flagged")
 	}
 }
+
+func TestShrunkSpeedLimit(t *testing.T) {
+	dir := os.Getenv("MKW_COURSE_DIR")
+	if dir == "" {
+		t.Skip("MKW_COURSE_DIR not set")
+	}
+	stats, err := items.LoadStats(filepath.Join(dir, "..", "Common.szs"))
+	if err != nil {
+		t.Skip(err)
+	}
+	run := func(factor float32) bool {
+		p := newPlayer(0, false)
+		p.move.floors, p.move.stats = items.NewTestFloors(items.FloorRoad, 100000), stats
+		p.move.vehicle, p.move.character = 7, 15
+		p.move.shrunk = true
+		top := stats.BaseSpeed(7, 15) * engineSpeedFactor
+		x := float32(-50000)
+		for f := uint32(200); f < 500; f += 2 {
+			x += top * factor * 2
+			checkMovement(p, f, moveRec(t, [3]float32{x, 100, 500}, nil), nil, false)
+			if p.move.shrinkNote != "" {
+				return true
+			}
+		}
+		return false
+	}
+	if run(0.72) {
+		t.Fatal("legit shrunk speed flagged")
+	}
+	if !run(1.0) {
+		t.Fatal("full speed while shrunk not flagged")
+	}
+}

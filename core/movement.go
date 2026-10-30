@@ -83,6 +83,9 @@ type moveState struct {
 	squishSince                           uint32 // Frame a Thwomp squished the player, 0 if never.
 	squishNote                            string // Log-only squish violation for trackMovement.
 	comboNote                             string // Combo speed violation for trackMovement.
+	shrunk                                bool   // Certainly small from a Lightning (set per packet).
+	shrinkNote                            string // Log-only shrunk speed violation.
+	lastShrinkLog                         time.Time
 	course                                *items.Course
 	driftSince                            uint32 // Frame the current drift started, 0 if not drifting.
 	lastComboLog                          time.Time
@@ -200,6 +203,8 @@ func checkMovement(p *Player, frame uint32, rd *records.RaceData, walls *items.W
 		descent := (first.pos[1] - pos[1]) / float32(frame-first.frame)
 		if limit, ok := comboSpeedLimit(m, frame, mega); ok && hspeed > limit && descent <= maxComboDescent && !airborne(m.floors, pos) && !airborne(m.floors, first.pos) && !onStickyRoad(m.floors, pos) && !onStickyRoad(m.floors, first.pos) && !(m.course != nil && m.course.NearBelt(pos)) {
 			m.comboNote = fmt.Sprintf("averaged %.0f u/f over %d frames with no boost (combo limit %.0f)", hspeed, frame-first.frame, limit)
+		} else if ok && m.shrunk && hspeed > limit*shockSpeedFactor && descent <= maxComboDescent && !airborne(m.floors, pos) && !airborne(m.floors, first.pos) && !onStickyRoad(m.floors, pos) && !(m.course != nil && m.course.NearBelt(pos)) {
+			m.shrinkNote = fmt.Sprintf("averaged %.0f u/f over %d frames while shrunk by Lightning (limit %.0f)", hspeed, frame-first.frame, limit*shockSpeedFactor)
 		}
 		if limit, ok := squishLimit(m, first.frame, frame); ok && !mega && !(frame < m.bulletUntil && !m.bulletEnded) && speed > limit {
 			m.squishNote = fmt.Sprintf("averaged %.0f u/f over %d frames while squished (limit %.0f)", speed, frame-first.frame, limit)
@@ -256,9 +261,18 @@ func trackMovement(a *Aid, pkt *RacePacket, now time.Time) {
 			p.move.floors, p.move.course = c.Floors, c
 		}
 		p.move.stats, p.move.vehicle, p.move.character = room.config.Stats, p.vehicle, p.character
+		p.move.shrunk = p.shrunk(now)
 		problem := checkMovement(p, frame, rd, walls, mega)
 		recordPos(a, i, p, rd, now)
 		trackShrinkSpeed(a, p, now)
+		if note := p.move.shrinkNote; note != "" {
+			p.move.shrinkNote = ""
+			if now.Sub(p.move.lastShrinkLog) >= moveLogInterval {
+				p.move.lastShrinkLog = now
+				logging.Log("Aid %d player %d shrink speed check failed (not enforced): %s", a.aid, i, note)
+				recordFlag(a, "shrink speed (not enforced): "+note, now)
+			}
+		}
 		if note := p.move.comboNote; note != "" {
 			p.move.comboNote = ""
 			if room.config.EnforceMovement {

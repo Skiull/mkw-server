@@ -72,3 +72,40 @@ func trackShrinkSpeed(a *Aid, p *Player, now time.Time) {
 func within(at time.Time, d time.Duration, now time.Time) bool {
 	return !at.IsZero() && now.Sub(at) <= d
 }
+
+// Shrink (Lightning) durations by row, from the community: row = position - 1 +
+// (12 - players), so with fewer players everyone gets a shorter shrink (10 players: 1st
+// gets 12-player 3rd place's). Plus 72 frames (1.2 s) for the tumble, all spent small.
+var shockDurations = [12]float64{11.5, 10.8, 10.0, 9.3, 8.5, 7.5, 6.5, 5.5, 4.5, 3.5, 2.5, 1.5}
+
+const (
+	shockTumble = 1200 * time.Millisecond
+	// Margins: speed takes a moment to drop after the hit, and the hit time on the server
+	// is off by the packet's lag.
+	shockSettle = time.Second
+	shockMargin = time.Second
+	// Speed while shrunk: x0.7 (Kinoko calcShock: drops 0.03/frame to 0.7).
+	shockSpeedFactor = 0.7
+)
+
+// shockDuration is how long a player at position (1-12) stays small in a room of players.
+func shockDuration(position, players int) time.Duration {
+	row := position - 1 + 12 - players
+	row = max(0, min(11, row))
+	return time.Duration(shockDurations[row]*float64(time.Second)) + shockTumble
+}
+
+// startShock notes a Lightning hit on p: they're small for a while. A Star or Bullet Bill
+// dodges it, and a Mega is cancelled instead. Caller must hold mu.
+func startShock(p *Player, now time.Time) {
+	if p.invincible(now) || p.rank == 0 {
+		return
+	}
+	p.shockFrom = now
+	p.shockUntil = now.Add(shockDuration(int(p.rank), racingPlayerCount()))
+}
+
+// shrunk reports whether p is certainly small now (inside the margins). Caller must hold mu.
+func (p *Player) shrunk(now time.Time) bool {
+	return !p.shockFrom.IsZero() && now.After(p.shockFrom.Add(shockSettle)) && now.Before(p.shockUntil.Add(-shockMargin))
+}
