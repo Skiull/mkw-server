@@ -42,6 +42,8 @@ type hitExpectation struct {
 	speedAt  float32
 	minSpeed float32
 	anyone   bool // Blue Shell: a hit on anyone in the room counts.
+	// Log only, never kick: whether it hit depends on what each game saw (lag).
+	logOnly bool
 }
 
 // Guarded by mu.
@@ -92,7 +94,10 @@ func checkRams(a *Aid, p *Player, now time.Time) {
 				continue
 			}
 			p.rammedAt = now
-			expectHit(a, p, fmt.Sprintf("rammed by aid %d (%s)", other.aid, q.powerName(now)), now, ramDeadline, false)
+			// Each game sees the others a little late, so a ram on one screen can be a miss on
+			// another (a Bullet Bill moves ~145 u/f). Logged, never kicked.
+			e := expectHit(a, p, fmt.Sprintf("rammed by aid %d (%s)", other.aid, q.powerName(now)), now, ramDeadline, false)
+			e.logOnly = true
 		}
 	}
 }
@@ -131,7 +136,9 @@ func expectBlueShell(user *Aid, now time.Time) {
 		}
 		for _, p := range a.players {
 			if p.rank == 1 {
-				expectHit(a, p, fmt.Sprintf("Blue Shell from aid %d", user.aid), now, blueShellWait, true)
+				// The leader can change while it flies: logged, never kicked.
+				e := expectHit(a, p, fmt.Sprintf("Blue Shell from aid %d", user.aid), now, blueShellWait, true)
+				e.logOnly = true
 				return
 			}
 		}
@@ -169,7 +176,7 @@ func resolveHits(now time.Time) (missed []*hitExpectation) {
 				e.aid.aid, playerIndex(e.aid, p), e.reason, e.speedAt, e.minSpeed)
 			missed = append(missed, e)
 			recordFlag(e.aid, "possible no-hit: "+e.reason, now)
-			if room.config.KickNoHit && !e.aid.kicked {
+			if room.config.KickNoHit && !e.logOnly && !e.aid.kicked {
 				logging.Log("Aid %d no-hit cheat: %s", e.aid.aid, e.reason)
 				kick(e.aid, KickCheating)
 			}

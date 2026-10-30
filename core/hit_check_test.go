@@ -69,7 +69,15 @@ func TestNoHitKick(t *testing.T) {
 	v.lastPos, v.lastPosAt, v.move.lastSpeed = [3]float32{100, 0, 0}, now, 80
 	checkRams(victim, v, now)
 	resolveHits(now.Add(2 * time.Second))
+	if victim.kicked {
+		t.Fatal("kicked for a ram (lag decides those)")
+	}
+	// Lightning hits everyone: missing it kicks.
+	victim.raceStarted = true
+	v.move.lastSpeed = 80
+	expectLightning(attacker, now)
+	resolveHits(now.Add(5 * time.Second))
 	if !victim.kicked {
-		t.Fatal("not kicked for skipping a certain hit")
+		t.Fatal("not kicked for skipping a Lightning")
 	}
 }
