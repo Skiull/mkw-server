@@ -54,6 +54,7 @@ func main() {
 	learnFile := flag.String("learn-file", "", "JSON file for values learned from trusted players (wfc-server reads its login hashes)")
 	recordRaw := flag.Bool("record-raw", false, "Diagnostics: also record raw race-state bytes whenever they change")
 	recordPackets := flag.Bool("record-packets", false, "Also save each player's race records as sent (<race>.pkt), for in-game replays (requires --record-dir)")
+	replaySpectate := flag.Bool("replay-spectate", false, "With --replay: the bots run the recorded race from when the room opens, for a watcher who joins it in progress")
 	replayFile := flag.String("replay", "", "Packet recording (.pkt) for the room's bots to play back instead of mirroring the live player")
 	recordDir := flag.String("record-dir", "", "Folder to save race recordings in (positions, items, flags per race)")
 	kickNoHit := flag.Bool("kick-no-hit", false, "Kick (as cheating) players who don't take a hit the server is sure of (rams, Lightning, Blue Shells, tracked Bananas and Fake Item Boxes)")
@@ -150,6 +151,7 @@ func main() {
 			os.Exit(1)
 		}
 		config.ReplayFile = *replayFile
+		config.ReplaySpectate = *replaySpectate
 	}
 	if *trustedPlayers != "" {
 		trusted, err := core.ParseTrustedPlayers(*trustedPlayers)

@@ -52,6 +52,9 @@ type Config struct {
 	RecordPackets bool
 	// Play this packet recording back with the room's bots instead of mirroring (replay.go).
 	ReplayFile string
+	// Replay bots run the recorded race themselves (from when the room opens) for a watcher
+	// who joins it in progress and spectates, instead of following the watcher's race.
+	ReplaySpectate bool
 	// Game hash challenges (challenge.go): where learned answers are kept, whether to learn
 	// them from the connected (clean!) clients, and whether to kick on a failed challenge.
 	ChallengeFile      string

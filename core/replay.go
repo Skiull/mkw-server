@@ -133,6 +133,7 @@ type replayFrame struct {
 type replayPlayer struct {
 	aid       byte
 	raceData  []replayFrame
+	frames    [numRecordTypes][]replayFrame // RaceInfo and RaceMode, for spectate replays.
 	vehicle   common.Vehicle
 	character common.Character
 	// Finish time and when they crossed the line (ms since the race started); -1 if they
@@ -144,6 +145,8 @@ type replayPlayer struct {
 type replayData struct {
 	course  common.Course
 	players []*replayPlayer
+	start   time.Time // When playback began (the room opened).
+	lengthMs int64
 }
 
 // Set once at startup from -replay. Read-only after that.
@@ -166,6 +169,7 @@ func LoadReplay(path string) error {
 			r.course = common.Course(m.Course)
 		}
 	}
+	r.start = time.Now()
 	replay = r
 	logging.Log("Loaded replay %s: course %d, %d players", path, r.course, len(r.players))
 	return nil
@@ -189,11 +193,15 @@ func parseReplay(r io.Reader) (*replayData, error) {
 		if _, err := io.ReadFull(r, data); err != nil {
 			break
 		}
+		out.lengthMs = max(out.lengthMs, ms)
 		p := byAid[aid]
 		if p == nil {
 			p = &replayPlayer{aid: aid, finishMs: -1, vehicle: common.StandardKartM, character: common.Mario}
 			byAid[aid] = p
 			out.players = append(out.players, p)
+		}
+		if t == common.RaceInfo || t == common.RaceMode {
+			p.frames[t] = append(p.frames[t], replayFrame{ms: ms, data: data})
 		}
 		switch t {
 		case common.RaceData:
@@ -249,14 +257,102 @@ func replayPlayerFor(bot *Aid) *replayPlayer {
 
 // replayRaceData is the recorded RaceData at ms into the race.
 func (p *replayPlayer) replayRaceData(ms int64) []byte {
-	if len(p.raceData) == 0 {
+	return frameAt(p.raceData, ms)
+}
+
+// frameAt is a copy of the last frame at or before ms (the first one before that).
+func frameAt(frames []replayFrame, ms int64) []byte {
+	if len(frames) == 0 {
 		return nil
 	}
-	i := sort.Search(len(p.raceData), func(i int) bool { return p.raceData[i].ms > ms })
+	i := sort.Search(len(frames), func(i int) bool { return frames[i].ms > ms })
 	if i > 0 {
 		i--
 	}
-	return append([]byte{}, p.raceData[i].data...)
+	return append([]byte{}, frames[i].data...)
+}
+
+// Spectate replays: the bots don't mirror anyone. They own the room (wfc-server makes a bot
+// the host and adds the watcher after them) and play the recorded race from the moment the
+// room opened, so the watcher joins a race already in progress and the game spectates it.
+// Each bot sends its recorded player's RaceInfo, RaceMode and RaceData, with aids changed
+// from the recorded ones to the bots'.
+
+// replayAidMap maps recorded aids to the bots playing them. Caller must hold mu.
+func replayAidMap() map[byte]byte {
+	m := map[byte]byte{}
+	for _, a := range aids {
+		if a.bot == nil {
+			continue
+		}
+		if p := replayPlayerFor(a); p != nil {
+			m[p.aid] = a.aid
+		}
+	}
+	return m
+}
+
+// replayPackets builds one packet from every replay bot to every real player. Caller must
+// hold mu.
+func replayPackets(now time.Time) []outgoing {
+	ms := now.Sub(replay.start).Milliseconds()
+	aidMap := replayAidMap()
+	var out []outgoing
+	for _, bot := range aids {
+		if bot.bot == nil {
+			continue
+		}
+		p := replayPlayerFor(bot)
+		if p == nil {
+			continue
+		}
+		for _, dest := range aids {
+			if dest.bot != nil || dest.kicked {
+				continue
+			}
+			out = append(out, outgoing{to: dest.addr, data: buildReplayPacket(bot, p, dest, aidMap, ms)})
+			bot.stats.sent++
+		}
+	}
+	return out
+}
+
+func buildReplayPacket(bot *Aid, p *replayPlayer, dest *Aid, aidMap map[byte]byte, ms int64) []byte {
+	var recs [numRecordTypes][]byte
+	if ri := frameAt(p.frames[common.RaceInfo], ms); len(ri) >= 0x24 {
+		binary.BigEndian.PutUint16(ri[0xc:], 0) // No lag.
+		for i := 0x18; i < 0x24; i++ {
+			if a, ok := aidMap[ri[i]]; ok {
+				ri[i] = a
+			}
+		}
+		recs[common.RaceInfo] = ri
+	}
+	if rm := frameAt(p.frames[common.RaceMode], ms); len(rm) >= 0x26 {
+		records.PutBits(rm, 41, 4, uint32(bot.aid)) // Player 1 slot.
+		rm[0x1c] = 0                                // Not disconnected.
+		recs[common.RaceMode] = rm
+	}
+	recs[common.RaceData] = p.replayRaceData(ms)
+	if dest.mirror != nil {
+		if u := dest.mirror.records[common.User]; u != nil {
+			d := append([]byte{}, u...)
+			binary.BigEndian.PutUint32(d[0x0:], 1)
+			binary.BigEndian.PutUint64(d[0xa8:], botFriendCode(bot.aid))
+			recs[common.User] = d
+		}
+	}
+	var ack byte
+	if dest.mirror != nil {
+		ack = dest.mirror.itemTimer
+	}
+	recs[common.Item] = []byte{0, byte(common.NoItem), byte(common.NoItem), 0, 0, 0, ack, 0}
+	ev := make([]byte, records.EventSlotCount)
+	for i := range ev {
+		ev[i] = byte(common.ObjNone)
+	}
+	recs[common.Event] = ev
+	return encodeRacePacket(bot.aid, dest.aid, recs)
 }
 
 // replayFinished reports a replayed player's finish once the replay has reached it.

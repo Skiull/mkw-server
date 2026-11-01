@@ -233,6 +233,9 @@ func botLoop() {
 
 // botPackets builds one packet from every bot to every real player. Caller must hold mu.
 func botPackets(now time.Time) []outgoing {
+	if replay != nil && room.config.ReplaySpectate {
+		return replayPackets(now)
+	}
 	ref := botReference(now)
 	if ref == nil {
 		return nil
