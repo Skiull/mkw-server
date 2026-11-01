@@ -44,6 +44,8 @@ type hitExpectation struct {
 	anyone   bool // Blue Shell: a hit on anyone in the room counts.
 	// Log only, never kick: whether it hit depends on what each game saw (lag).
 	logOnly bool
+	// The tracked ground item driven through, if that's the reason.
+	item *groundItem
 }
 
 // Guarded by mu.

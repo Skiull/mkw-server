@@ -148,3 +148,29 @@ func TestThrownFakeItemBoxOnlyChecksReports(t *testing.T) {
 		t.Fatal("report of hitting a thrown Fake Item Box not checked")
 	}
 }
+
+// A player's shell destroys their Banana, then they drive over its spot. The shell-hit
+// report can arrive just after the drive-through, or just before it from far away.
+func TestOwnShellDestroyedBanana(t *testing.T) {
+	for _, reportFirst := range []bool{false, true} {
+		setupRoom(t, flatCourse())
+		a := addTestAid(t, 0, false)
+		now := time.Now()
+		trackShot(a, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 0, 0}, Vel: [3]float32{-3, 7, -1}}, now)
+		later := now.Add(3 * time.Second)
+		report := func() {
+			a.players[0].lastPos = [3]float32{0, 0, -860} // The kart, well behind the Banana.
+			removeHitItem(a, common.ObjBanana, later)
+		}
+		if reportFirst {
+			report()
+		}
+		checkGroundItems(a, a.players[0], [3]float32{-200, 0, 30}, [3]float32{200, 0, 30}, later)
+		if !reportFirst {
+			report()
+		}
+		if len(hitExpectations) != 0 {
+			t.Errorf("reportFirst=%v: %d hit expectations, want 0", reportFirst, len(hitExpectations))
+		}
+	}
+}

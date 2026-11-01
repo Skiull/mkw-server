@@ -33,7 +33,13 @@ const (
 	ownItemGrace        = 2 * time.Second
 	groundItemLifetime  = 3 * time.Minute
 	maxGroundItems      = 64
-	hitRemoveRadius     = 700 // A HitFree report removes the nearest tracked item this close.
+	// A HitFree reported further than radius+hitReportSlack from the item means the player's
+	// own item (a shell) hit it. The report carries the kart's position, not the shell's,
+	// so the item can be this far away.
+	ownItemHitRadius = 3000
+	// A drive-through expectation is dropped if the item turns out to have been destroyed
+	// by the player's shell this soon after (the reports can arrive in either order).
+	ownItemHitWindow = 1500 * time.Millisecond
 	hitReportSlack      = 400 // Position lag between touching an item and the report (a few frames at ~90 u/f).
 	droppedDistance     = 600 // Landing this close to the spawn point counts as a drop.
 )
@@ -114,7 +120,26 @@ func removeHitItem(a *Aid, obj common.ItemObject, now time.Time) {
 		return
 	}
 	p := a.players[0]
-	best, bestDist := -1, float32(hitRemoveRadius)
+
+	// Already counted as driven through: if this report is from well away from it, the
+	// player's own item destroyed it first. Drop that expectation.
+	kept := hitExpectations[:0]
+	cancelled := false
+	for _, e := range hitExpectations {
+		if !cancelled && e.item != nil && e.aid == a && e.item.obj == obj && now.Sub(e.at) < ownItemHitWindow &&
+			items.Distance(e.item.pos, p.lastPos) > e.item.radius()+hitReportSlack {
+			cancelled = true
+			logging.Log("Aid %d's own item hit the %v at (%.0f, %.0f, %.0f) before they drove there", a.aid, obj, e.item.pos[0], e.item.pos[1], e.item.pos[2])
+			continue
+		}
+		kept = append(kept, e)
+	}
+	hitExpectations = kept
+	if cancelled {
+		return
+	}
+
+	best, bestDist := -1, float32(ownItemHitRadius)
 	for i, g := range groundItems {
 		if g.obj == obj {
 			if d := items.Distance(g.pos, p.lastPos); d < bestDist {
@@ -152,7 +177,8 @@ func checkGroundItems(a *Aid, p *Player, prev, pos [3]float32, now time.Time) {
 			continue
 		}
 		if !p.invincible(now) {
-			expectHit(a, p, fmt.Sprintf("drove through a %v dropped by aid %d", g.obj, g.owner.aid), now, ramDeadline, false)
+			e := expectHit(a, p, fmt.Sprintf("drove through a %v dropped by aid %d", g.obj, g.owner.aid), now, ramDeadline, false)
+			e.item = g
 			logging.Log("Aid %d player %d drove through a %v at (%.0f, %.0f, %.0f)", a.aid, playerIndex(a, p), g.obj, g.pos[0], g.pos[1], g.pos[2])
 		}
 	}
