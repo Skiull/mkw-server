@@ -152,6 +152,9 @@ type replayData struct {
 // Set once at startup from -replay. Read-only after that.
 var replay *replayData
 
+// Set once the replay is over. Guarded by mu.
+var replayEnded bool
+
 // LoadReplay reads a .pkt recording for -replay.
 func LoadReplay(path string) error {
 	f, err := os.Open(path)
@@ -200,7 +203,7 @@ func parseReplay(r io.Reader) (*replayData, error) {
 			byAid[aid] = p
 			out.players = append(out.players, p)
 		}
-		if t == common.RaceInfo || t == common.RaceMode {
+		if t == common.RaceInfo || t == common.RaceMode || t == common.Item || t == common.Event {
 			p.frames[t] = append(p.frames[t], replayFrame{ms: ms, data: data})
 		}
 		switch t {
@@ -292,10 +295,23 @@ func replayAidMap() map[byte]byte {
 	return m
 }
 
+// How long the room stays open after the recording ends, so the watcher sees the finish.
+// Then mkw-server exits and wfc-server closes the room: the bots can't run the results
+// screen or another race, and the game would sit there forever.
+const replayEndLinger = 12 * time.Second
+
 // replayPackets builds one packet from every replay bot to every real player. Caller must
 // hold mu.
 func replayPackets(now time.Time) []outgoing {
 	ms := now.Sub(replay.start).Milliseconds()
+	if ms > replay.lengthMs+replayEndLinger.Milliseconds() && !replayEnded {
+		replayEnded = true
+		logging.Log("Replay finished. Closing the room")
+		go func() {
+			time.Sleep(time.Second) // Let the log flush.
+			os.Exit(0)
+		}()
+	}
 	aidMap := replayAidMap()
 	var out []outgoing
 	for _, bot := range aids {
@@ -342,14 +358,24 @@ func buildReplayPacket(bot *Aid, p *replayPlayer, dest *Aid, aidMap map[byte]byt
 			recs[common.User] = d
 		}
 	}
+	// Recorded items and item events (throws, drops, hits), so the watcher's game shows them.
+	// ack_timer echoes the watcher's own item timer, as bots do.
 	var ack byte
 	if dest.mirror != nil {
 		ack = dest.mirror.itemTimer
 	}
-	recs[common.Item] = []byte{0, byte(common.NoItem), byte(common.NoItem), 0, 0, 0, ack, 0}
-	ev := make([]byte, records.EventSlotCount)
-	for i := range ev {
-		ev[i] = byte(common.ObjNone)
+	item := frameAt(p.frames[common.Item], ms)
+	if len(item) < records.ItemLen {
+		item = []byte{0, byte(common.NoItem), byte(common.NoItem), 0, 0, 0, 0, 0}
+	}
+	item[6] = ack
+	recs[common.Item] = item
+	ev := frameAt(p.frames[common.Event], ms)
+	if len(ev) == 0 {
+		ev = make([]byte, records.EventSlotCount)
+		for i := range ev {
+			ev[i] = byte(common.ObjNone)
+		}
 	}
 	recs[common.Event] = ev
 	return encodeRacePacket(bot.aid, dest.aid, recs)
