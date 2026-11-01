@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"mkw-server/common"
@@ -44,7 +45,7 @@ var rec *recording
 // startRecording begins a new race recording. Caller must hold mu.
 func startRecording(course common.Course, now time.Time) {
 	dir := room.config.RecordDir
-	if dir == "" {
+	if dir == "" || room.config.ReplayFile != "" {
 		return
 	}
 	stopRecording(now)
@@ -67,6 +68,7 @@ func startRecording(course common.Course, now time.Time) {
 		players: map[[2]int]bool{}, lastPos: map[[2]int]time.Time{}, lastAt: now, lastRaw: map[[2]int]string{}}
 	rec.write(map[string]any{"type": "race", "start": now.Format(time.RFC3339), "course": course, "room": room.addr.String()})
 	writeCourseOutline(dir, course)
+	startPacketRecording(strings.TrimSuffix(name, ".jsonl"), course)
 }
 
 // stopRecording finishes the current recording. Caller must hold mu.
@@ -77,6 +79,7 @@ func stopRecording(now time.Time) {
 	rec.write(map[string]any{"type": "end", "t": rec.ms(now)})
 	rec.f.Close()
 	rec = nil
+	stopPacketRecording()
 }
 
 func (r *recording) ms(now time.Time) int64 { return now.Sub(r.start).Milliseconds() }

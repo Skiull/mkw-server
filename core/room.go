@@ -48,6 +48,10 @@ type Config struct {
 	RecordDir string
 	// Also record raw race-state bytes when they change (diagnostics).
 	RecordRaw bool
+	// Also record each player's race records as sent, for in-game replays (replay.go).
+	RecordPackets bool
+	// Play this packet recording back with the room's bots instead of mirroring (replay.go).
+	ReplayFile string
 	// Game hash challenges (challenge.go): where learned answers are kept, whether to learn
 	// them from the connected (clean!) clients, and whether to kick on a failed challenge.
 	ChallengeFile      string
@@ -246,6 +250,7 @@ func handlePacket(addr net.Addr, data []byte, now time.Time) []net.Addr {
 	}
 	trackMovement(a, pkt, now)
 	recordMirrorSource(a, data, pkt, now)
+	recordPackets(a, now)
 
 	a.stats.valid++
 	var relayTo []net.Addr

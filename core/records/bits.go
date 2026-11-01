@@ -49,3 +49,8 @@ func PutBits(data []byte, bitOffset, n int, v uint32) {
 		}
 	}
 }
+
+// GetBits reads n bits (n <= 32) starting at an absolute bit offset, MSB first.
+func GetBits(data []byte, bitOffset, n int) uint32 {
+	return readBits(data, bitOffset, n)
+}

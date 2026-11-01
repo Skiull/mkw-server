@@ -53,6 +53,8 @@ func main() {
 	trustedPlayers := flag.String("trusted-players", "", "Comma-separated friend codes or profile IDs whose clients are trusted: their game hashes, challenge answers and data blocks are learned")
 	learnFile := flag.String("learn-file", "", "JSON file for values learned from trusted players (wfc-server reads its login hashes)")
 	recordRaw := flag.Bool("record-raw", false, "Diagnostics: also record raw race-state bytes whenever they change")
+	recordPackets := flag.Bool("record-packets", false, "Also save each player's race records as sent (<race>.pkt), for in-game replays (requires --record-dir)")
+	replayFile := flag.String("replay", "", "Packet recording (.pkt) for the room's bots to play back instead of mirroring the live player")
 	recordDir := flag.String("record-dir", "", "Folder to save race recordings in (positions, items, flags per race)")
 	kickNoHit := flag.Bool("kick-no-hit", false, "Kick (as cheating) players who don't take a hit the server is sure of (rams, Lightning, Blue Shells, tracked Bananas and Fake Item Boxes)")
 	kickDataCheats := flag.Bool("kick-data-cheats", false, "Kick (as cheating) clients whose StaticR.rel .data changed outside --mutable-data-blocks")
@@ -141,6 +143,14 @@ func main() {
 	config.KickNoHit = *kickNoHit
 	config.RecordDir = *recordDir
 	config.RecordRaw = *recordRaw
+	config.RecordPackets = *recordPackets
+	if *replayFile != "" {
+		if err := core.LoadReplay(*replayFile); err != nil {
+			logging.Log("Failed to load replay: %v", err)
+			os.Exit(1)
+		}
+		config.ReplayFile = *replayFile
+	}
 	if *trustedPlayers != "" {
 		trusted, err := core.ParseTrustedPlayers(*trustedPlayers)
 		if err != nil {

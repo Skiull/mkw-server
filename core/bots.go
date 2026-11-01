@@ -275,27 +275,43 @@ func buildBotPacket(bot, ref, dest *Aid, now time.Time) []byte {
 		}
 	}
 	vehicle := bot.bot.vehicle(refVehicle)
+	rp := replayPlayerFor(bot)
+	if rp != nil {
+		vehicle = rp.vehicle
+	}
+	character := bot.bot.character
+	if rp != nil {
+		character = rp.character
+	}
 
 	if ri := src[common.RaceInfo]; ri != nil {
 		d := append([]byte{}, ri...)
 		binary.BigEndian.PutUint16(d[0xc:], 0) // No lag.
 		if d[0xe] != byte(common.RaceInfoDefaultVehicle) {
-			d[0xe], d[0xf] = byte(vehicle), byte(bot.bot.character)
+			d[0xe], d[0xf] = byte(vehicle), byte(character)
 		}
 		d[0x10], d[0x11] = byte(common.RaceInfoDefaultVehicle), byte(common.RaceInfoDefaultCharacter)
 		recs[common.RaceInfo] = d
 	}
 
 	if rm := src[common.RaceMode]; rm != nil {
-		recs[common.RaceMode] = botRaceMode(rm, mode, bot, ref.mirror, now)
+		recs[common.RaceMode] = botRaceMode(rm, mode, bot, ref, rp, now)
 	}
 
 	if sel := src[common.RoomSelect]; len(sel) == records.SelectLen {
-		recs[common.RoomSelect] = botSelect(sel, bot, vehicle, dest, now)
+		recs[common.RoomSelect] = botSelect(sel, bot, vehicle, character, dest, now)
+		if rp != nil && replay.course.IsValid(common.RoomSelect) {
+			recs[common.RoomSelect][0x16] = byte(replay.course) // Vote for the recorded course.
+		}
 	}
 
 	if rd := src[common.RaceData]; rd != nil {
 		recs[common.RaceData] = botRaceData(ref.mirror, bot.bot.delay, now)
+		if rp != nil {
+			if d := rp.replayRaceData(replayMs(ref, now)); d != nil {
+				recs[common.RaceData] = d
+			}
+		}
 	}
 
 	if u := src[common.User]; u != nil {
@@ -327,7 +343,8 @@ func buildBotPacket(bot, ref, dest *Aid, now time.Time) []byte {
 	return encodeRacePacket(bot.aid, dest.aid, recs)
 }
 
-func botRaceMode(rm []byte, mode common.GameMode, bot *Aid, m *mirrorSource, now time.Time) []byte {
+func botRaceMode(rm []byte, mode common.GameMode, bot *Aid, ref *Aid, rp *replayPlayer, now time.Time) []byte {
+	m := ref.mirror
 	d := append([]byte{}, rm...)
 	aid := bot.aid
 	switch mode {
@@ -335,7 +352,16 @@ func botRaceMode(rm []byte, mode common.GameMode, bot *Aid, m *mirrorSource, now
 		records.PutBits(d, 39, 2, 1)           // One local player.
 		records.PutBits(d, 41, 4, uint32(aid)) // Player 1 slot.
 		records.PutBits(d, 45, 22, 0)          // Not finished.
-		if ft, bit, ok := botFinish(bot, m, now); ok {
+		ft, bit, ok := botFinish(bot, m, now)
+		if rp != nil {
+			// Replayed racers finish at their recorded time.
+			ft, ok = rp.replayFinished(replayMs(ref, now))
+			bit = -1
+			if id := playerIdOf(m.records[common.RaceInfo], bot.aid); id >= 0 {
+				bit = id + m.finishBitShift
+			}
+		}
+		if ok {
 			records.PutBits(d, 45, 22, packFinishTime(ft))
 			if bit >= 0 && bit < raceModePlayerBits {
 				records.PutBits(d, bit, 1, 1)
@@ -354,7 +380,7 @@ func botRaceMode(rm []byte, mode common.GameMode, bot *Aid, m *mirrorSource, now
 	return d
 }
 
-func botSelect(sel []byte, bot *Aid, vehicle common.Vehicle, dest *Aid, now time.Time) []byte {
+func botSelect(sel []byte, bot *Aid, vehicle common.Vehicle, character common.Character, dest *Aid, now time.Time) []byte {
 	d := append([]byte{}, sel...)
 
 	// time_sender is milliseconds since 2000-01-01. time_receiver echoes dest's clock.
@@ -367,7 +393,7 @@ func botSelect(sel []byte, bot *Aid, vehicle common.Vehicle, dest *Aid, now time
 	binary.BigEndian.PutUint64(d[0x8:], receiver)
 
 	// Player 1 keeps the reference's spot, points, vote and rank icon.
-	d[0x14], d[0x15] = byte(bot.bot.character), byte(vehicle)
+	d[0x14], d[0x15] = byte(character), byte(vehicle)
 
 	// No guest.
 	clear(d[0x18:0x1c])
