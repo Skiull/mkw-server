@@ -279,6 +279,16 @@ func parseReplay(r io.Reader) (*replayData, error) {
 	if len(out.players) == 0 {
 		return nil, errors.New("no players recorded")
 	}
+	// A recording runs on past the race (results, the next vote) until the next race starts.
+	// The replay ends a little after the last finish instead, or the bots would take the
+	// watcher into a vote.
+	lastFinish := int64(-1)
+	for _, p := range out.players {
+		lastFinish = max(lastFinish, p.finishMs)
+	}
+	if lastFinish >= 0 {
+		out.lengthMs = min(out.lengthMs, lastFinish+replayAfterFinish.Milliseconds())
+	}
 	sort.Slice(out.players, func(i, j int) bool { return out.players[i].aid < out.players[j].aid })
 	return out, nil
 }
@@ -371,10 +381,13 @@ func replayAidMap(seats map[byte]replaySeat) map[byte]byte {
 	return m
 }
 
-// How long the room stays open after the recording ends, so the watcher sees the finish.
+// How long the room stays open after the replay ends.
 // Then mkw-server exits and wfc-server closes the room: the bots can't run the results
 // screen or another race, and the game would sit there forever.
-const replayEndLinger = 12 * time.Second
+const replayEndLinger = 2 * time.Second
+
+// How long a replay runs after the last player finished.
+const replayAfterFinish = 8 * time.Second
 
 // replayPackets builds one packet from every replay bot to every real player. Caller must
 // hold mu.

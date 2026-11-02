@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -142,5 +143,31 @@ func TestRecordingKeepsUserAndProfile(t *testing.T) {
 	p := replay.players[0]
 	if p.profile != 612345678 || len(p.frames[common.User]) != 1 || !bytes.Equal(p.frames[common.User][0].data, user) {
 		t.Fatalf("profile %d, %d user frames", p.profile, len(p.frames[common.User]))
+	}
+}
+
+func TestReplayEndsAfterLastFinish(t *testing.T) {
+	var buf bytes.Buffer
+	buf.WriteString(replayMagic)
+	frame := func(ms uint32, aid byte, t common.RecordIdx, data []byte) {
+		var hdr [8]byte
+		binary.BigEndian.PutUint32(hdr[0:], ms)
+		hdr[4], hdr[5] = aid, byte(t)
+		binary.BigEndian.PutUint16(hdr[6:], uint16(len(data)))
+		buf.Write(hdr[:])
+		buf.Write(data)
+	}
+	rm := make([]byte, 0x26)
+	frame(1000, 0, common.RaceMode, rm)
+	finished := append([]byte{}, rm...)
+	records.PutBits(finished, 45, 22, 1<<16) // 1:00.000
+	frame(90000, 0, common.RaceMode, finished)
+	frame(150000, 0, common.RaceMode, rm) // The next lobby.
+	r, err := parseReplay(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.lengthMs != 90000+replayAfterFinish.Milliseconds() {
+		t.Fatalf("length %d", r.lengthMs)
 	}
 }
