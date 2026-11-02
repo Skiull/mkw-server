@@ -62,6 +62,7 @@ type mirrorSource struct {
 	itemTimer  byte      // Timer of player 1's latest ITEM record, for bots to acknowledge.
 	raceData   []timedRecord
 	timeSender uint64 // Latest Select time_sender, echoed back as time_receiver.
+	lastUser   []byte // Latest User record (Miis, names, location), kept across packets.
 	timeAt     time.Time
 
 	// When the reference finished the current race (zero until then), their finishing time,
@@ -170,6 +171,9 @@ func recordMirrorSource(a *Aid, data []byte, pkt *RacePacket, now time.Time) {
 		m.records[common.RoomSelect] = nil
 	}
 	m.lastAt = now
+	if u := m.records[common.User]; u != nil {
+		m.lastUser = u
+	}
 	if it := m.records[common.Item]; len(it) >= records.ItemLen {
 		m.itemTimer = it[0]
 	}

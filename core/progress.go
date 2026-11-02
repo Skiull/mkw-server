@@ -325,6 +325,10 @@ func checkFinish(a *Aid, pkt *RacePacket, now time.Time) {
 			time.Duration(ft.Milliseconds)*time.Millisecond
 		var problem string
 		switch {
+		case !finishOK(st) && someoneElseFinished(p):
+			// Once someone has crossed the line the game ends the race for everyone still
+			// driving (time's up) and marks them finished too. Not a cheat.
+			logging.Log("Aid %d player %d finished on lap %d (%.2f): race ended by an earlier finisher", a.aid, i, st.lap, st.completion)
 		case !finishOK(st):
 			problem = fmt.Sprintf("claims to have finished, but the server has them on lap %d (%.2f)", st.lap, st.completion)
 		case st.finishFrame != 0:
@@ -343,6 +347,19 @@ func checkFinish(a *Aid, pkt *RacePacket, now time.Time) {
 		}
 		logging.Log("Aid %d player %d finish check failed (not enforced): %s", a.aid, i, problem)
 	}
+}
+
+// someoneElseFinished reports whether another player in the room has really finished this
+// race (the server saw them complete it). Caller must hold mu.
+func someoneElseFinished(p *Player) bool {
+	for _, a := range aids {
+		for _, q := range a.players {
+			if q != p && q.progress.finishSeen && finishOK(&q.progress) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // finishOK reports whether the server agrees the player can have finished.

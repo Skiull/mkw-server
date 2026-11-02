@@ -40,8 +40,8 @@ const (
 	// A drive-through expectation is dropped if the item turns out to have been destroyed
 	// by the player's shell this soon after (the reports can arrive in either order).
 	ownItemHitWindow = 1500 * time.Millisecond
-	hitReportSlack      = 400 // Position lag between touching an item and the report (a few frames at ~90 u/f).
-	droppedDistance     = 600 // Landing this close to the spawn point counts as a drop.
+	hitReportSlack   = 400 // Position lag between touching an item and the report (a few frames at ~90 u/f).
+	droppedDistance  = 600 // Landing this close to the spawn point counts as a drop.
 )
 
 type groundItem struct {

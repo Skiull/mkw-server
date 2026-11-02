@@ -1,0 +1,14 @@
+//go:build !windows
+
+package core
+
+import "syscall"
+
+// diskFree returns the bytes free to this user on the disk holding dir.
+func diskFree(dir string) (uint64, error) {
+	var s syscall.Statfs_t
+	if err := syscall.Statfs(dir, &s); err != nil {
+		return 0, err
+	}
+	return s.Bavail * uint64(s.Bsize), nil
+}

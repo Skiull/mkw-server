@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -19,7 +20,9 @@ import (
 
 // Race replays. With -record-packets (and -record-dir), every race also gets a packet
 // recording next to its .jsonl: <name>.pkt holds each real player's race records as sent,
-// and <name>.players.json lists who raced (wfc-server reads it to add one bot per player).
+// and <name>.players.json lists who raced and their profile ids (wfc-server reads it to pick
+// a race the watcher was in and add one bot per player). Only the newest maxPacketRecordings
+// are kept, and a race isn't recorded when the disk is nearly full.
 //
 // .pkt layout: the magic, then frames of
 //
@@ -30,13 +33,20 @@ import (
 // With -replay <file.pkt>, the room's bots play the recorded players back instead of
 // mirroring the live player: bot k (by aid) drives player k's recorded RaceData, timed from
 // the live race's countdown start, with that player's character and vehicle. Lobby and
-// countdown state still come from the live player, like test bots. Items and hits aren't
-// replayed: the bots hold nothing.
+// countdown state still come from the live player, like test bots.
 
 const replayMagic = "MKWRPL1\n"
 
-// Record types written to .pkt files. Select, User and Room records are left out.
-var replayRecordTypes = []common.RecordIdx{common.RaceInfo, common.RaceMode, common.RaceData, common.Item, common.Event}
+// Record types written to .pkt files. Select and Room records are left out. User (Miis,
+// names, location) is the player's latest one, which is usually sent before the race.
+var replayRecordTypes = []common.RecordIdx{common.User, common.RaceInfo, common.RaceMode, common.RaceData, common.Item, common.Event}
+
+// How many packet recordings to keep, and the free disk space needed to start one (a race
+// is a few MB).
+const (
+	maxPacketRecordings = 12
+	minFreeDiskBytes    = 200 << 20
+)
 
 type packetRecording struct {
 	f       *os.File
@@ -44,7 +54,7 @@ type packetRecording struct {
 	base    string
 	course  common.Course
 	last    map[[2]int]string // aid, record type: last record written.
-	players map[byte]bool
+	players map[byte]uint32   // aid: profile id (0 if unknown).
 }
 
 // Guarded by mu. Nil unless -record-packets is on and a race is being recorded.
@@ -57,14 +67,34 @@ func startPacketRecording(base string, course common.Course) {
 	if !room.config.RecordPackets || room.config.ReplayFile != "" {
 		return
 	}
+	if free, err := diskFree(filepath.Dir(base)); err == nil && free < minFreeDiskBytes {
+		logging.Log("Not recording packets: only %d MB free", free>>20)
+		return
+	}
 	f, err := os.Create(base + ".pkt")
 	if err != nil {
 		logging.Log("Can't create packet recording: %v", err)
 		return
 	}
 	pktRec = &packetRecording{f: f, w: bufio.NewWriterSize(f, 64*1024), base: base, course: course,
-		last: map[[2]int]string{}, players: map[byte]bool{}}
+		last: map[[2]int]string{}, players: map[byte]uint32{}}
 	pktRec.w.WriteString(replayMagic)
+	prunePacketRecordings(room.config.RecordDir, maxPacketRecordings-1)
+}
+
+// prunePacketRecordings deletes all but the newest keep packet recordings (and their player
+// lists) under dir. The race .jsonl files stay.
+func prunePacketRecordings(dir string, keep int) {
+	files, _ := filepath.Glob(filepath.Join(dir, "*", "*.pkt"))
+	if len(files) <= keep {
+		return
+	}
+	// Names start with the date folder and time, so they sort oldest first.
+	sort.Strings(files)
+	for _, f := range files[:len(files)-keep] {
+		os.Remove(f)
+		os.Remove(strings.TrimSuffix(f, ".pkt") + ".players.json")
+	}
 }
 
 // stopPacketRecording finishes the packet recording. Caller must hold mu.
@@ -86,12 +116,15 @@ func recordPackets(a *Aid, now time.Time) {
 	if ms < 0 {
 		return
 	}
-	if !pktRec.players[a.aid] {
-		pktRec.players[a.aid] = true
+	if profile, ok := pktRec.players[a.aid]; !ok || profile != a.profileID {
+		pktRec.players[a.aid] = a.profileID
 		pktRec.writePlayers()
 	}
 	for _, t := range replayRecordTypes {
 		data := a.mirror.records[t]
+		if t == common.User {
+			data = a.mirror.lastUser
+		}
 		if len(data) == 0 {
 			continue
 		}
@@ -115,11 +148,13 @@ func recordPackets(a *Aid, now time.Time) {
 
 func (p *packetRecording) writePlayers() {
 	var list []int
-	for aid := range p.players {
+	profiles := map[string]uint32{}
+	for aid, profile := range p.players {
 		list = append(list, int(aid))
+		profiles[fmt.Sprint(aid)] = profile
 	}
 	sort.Ints(list)
-	data, _ := json.Marshal(map[string]any{"course": p.course, "players": list})
+	data, _ := json.Marshal(map[string]any{"course": p.course, "players": list, "profiles": profiles})
 	os.WriteFile(p.base+".players.json", data, 0o644)
 }
 
@@ -132,8 +167,9 @@ type replayFrame struct {
 // replayPlayer is one recorded racer.
 type replayPlayer struct {
 	aid       byte
+	profile   uint32 // Profile id, from the player list (0 if unknown).
 	raceData  []replayFrame
-	frames    [numRecordTypes][]replayFrame // RaceInfo and RaceMode, for spectate replays.
+	frames    [numRecordTypes][]replayFrame // Other record types, for spectate replays.
 	vehicle   common.Vehicle
 	character common.Character
 	// Finish time and when they crossed the line (ms since the race started); -1 if they
@@ -143,9 +179,9 @@ type replayPlayer struct {
 }
 
 type replayData struct {
-	course  common.Course
-	players []*replayPlayer
-	start   time.Time // When playback began (the room opened).
+	course   common.Course
+	players  []*replayPlayer
+	start    time.Time // When playback began (the room opened).
 	lengthMs int64
 }
 
@@ -167,9 +203,15 @@ func LoadReplay(path string) error {
 		return fmt.Errorf("%s: %w", path, err)
 	}
 	if meta, err := os.ReadFile(strings.TrimSuffix(path, ".pkt") + ".players.json"); err == nil {
-		var m struct{ Course int }
+		var m struct {
+			Course   int
+			Profiles map[string]uint32
+		}
 		if json.Unmarshal(meta, &m) == nil {
 			r.course = common.Course(m.Course)
+			for _, p := range r.players {
+				p.profile = m.Profiles[fmt.Sprint(p.aid)]
+			}
 		}
 	}
 	r.start = time.Now()
@@ -203,7 +245,7 @@ func parseReplay(r io.Reader) (*replayData, error) {
 			byAid[aid] = p
 			out.players = append(out.players, p)
 		}
-		if t == common.RaceInfo || t == common.RaceMode || t == common.Item || t == common.Event {
+		if t != common.RaceData {
 			p.frames[t] = append(p.frames[t], replayFrame{ms: ms, data: data})
 		}
 		switch t {
@@ -237,25 +279,57 @@ func parseReplay(r io.Reader) (*replayData, error) {
 	return out, nil
 }
 
-// replayPlayerFor picks the recorded player a bot plays: the k-th bot by aid plays the k-th
-// recorded player. Caller must hold mu.
-func replayPlayerFor(bot *Aid) *replayPlayer {
+// replaySeat is what a bot plays: a recorded player, and maybe a second one as its guest.
+type replaySeat struct {
+	main, guest *replayPlayer
+}
+
+// replaySeats assigns recorded players to bots: the k-th bot by aid plays the k-th recorded
+// player. A room has room for 11 bots next to the watcher, so in a 12-player race the
+// watcher's own recorded player rides as the first bot's guest (a second local player, like
+// split screen) instead of being left out. Caller must hold mu.
+func replaySeats() map[byte]replaySeat {
+	seats := map[byte]replaySeat{}
 	if replay == nil {
-		return nil
+		return seats
 	}
-	var botAids []int
+	var bots []int
+	watchers := map[uint32]bool{}
 	for _, a := range aids {
 		if a.bot != nil {
-			botAids = append(botAids, int(a.aid))
+			bots = append(bots, int(a.aid))
+		} else if a.profileID != 0 {
+			watchers[a.profileID] = true
 		}
 	}
-	sort.Ints(botAids)
-	for k, aid := range botAids {
-		if aid == int(bot.aid) && k < len(replay.players) {
-			return replay.players[k]
+	sort.Ints(bots)
+	players := replay.players
+	var guest *replayPlayer
+	if len(players) > len(bots) {
+		for i, p := range players {
+			if p.profile != 0 && watchers[p.profile] {
+				guest = p
+				players = append(append([]*replayPlayer{}, players[:i]...), players[i+1:]...)
+				break
+			}
 		}
 	}
-	return nil
+	for k, aid := range bots {
+		if k >= len(players) {
+			break
+		}
+		seat := replaySeat{main: players[k]}
+		if k == 0 && room.config.ReplaySpectate {
+			seat.guest = guest
+		}
+		seats[byte(aid)] = seat
+	}
+	return seats
+}
+
+// replayPlayerFor is the recorded player a bot plays. Caller must hold mu.
+func replayPlayerFor(bot *Aid) *replayPlayer {
+	return replaySeats()[bot.aid].main
 }
 
 // replayRaceData is the recorded RaceData at ms into the race.
@@ -281,15 +355,13 @@ func frameAt(frames []replayFrame, ms int64) []byte {
 // Each bot sends its recorded player's RaceInfo, RaceMode and RaceData, with aids changed
 // from the recorded ones to the bots'.
 
-// replayAidMap maps recorded aids to the bots playing them. Caller must hold mu.
-func replayAidMap() map[byte]byte {
+// replayAidMap maps recorded aids to the bots playing them.
+func replayAidMap(seats map[byte]replaySeat) map[byte]byte {
 	m := map[byte]byte{}
-	for _, a := range aids {
-		if a.bot == nil {
-			continue
-		}
-		if p := replayPlayerFor(a); p != nil {
-			m[p.aid] = a.aid
+	for aid, seat := range seats {
+		m[seat.main.aid] = aid
+		if seat.guest != nil {
+			m[seat.guest.aid] = aid
 		}
 	}
 	return m
@@ -312,28 +384,39 @@ func replayPackets(now time.Time) []outgoing {
 			os.Exit(0)
 		}()
 	}
-	aidMap := replayAidMap()
+	seats := replaySeats()
+	aidMap := replayAidMap(seats)
 	var out []outgoing
 	for _, bot := range aids {
 		if bot.bot == nil {
 			continue
 		}
-		p := replayPlayerFor(bot)
-		if p == nil {
+		seat, ok := seats[bot.aid]
+		if !ok {
 			continue
 		}
 		for _, dest := range aids {
 			if dest.bot != nil || dest.kicked {
 				continue
 			}
-			out = append(out, outgoing{to: dest.addr, data: buildReplayPacket(bot, p, dest, aidMap, ms)})
+			out = append(out, outgoing{to: dest.addr, data: buildReplayPacket(bot, seat, dest, aidMap, ms)})
 			bot.stats.sent++
 		}
 	}
 	return out
 }
 
-func buildReplayPacket(bot *Aid, p *replayPlayer, dest *Aid, aidMap map[byte]byte, ms int64) []byte {
+// Offsets in the User record (records/user.go).
+const (
+	userPresentMiis = 0x0
+	userMii1        = 0x8
+	userMii2        = 0x54
+	userMiiLen      = 0x4c
+	userFriendCode  = 0xa8
+)
+
+func buildReplayPacket(bot *Aid, seat replaySeat, dest *Aid, aidMap map[byte]byte, ms int64) []byte {
+	p, g := seat.main, seat.guest
 	var recs [numRecordTypes][]byte
 	if ri := frameAt(p.frames[common.RaceInfo], ms); len(ri) >= 0x24 {
 		binary.BigEndian.PutUint16(ri[0xc:], 0) // No lag.
@@ -342,21 +425,50 @@ func buildReplayPacket(bot *Aid, p *replayPlayer, dest *Aid, aidMap map[byte]byt
 				ri[i] = a
 			}
 		}
+		if g != nil {
+			// Player 2's vehicle and character.
+			if gri := frameAt(g.frames[common.RaceInfo], ms); len(gri) >= 0x10 {
+				ri[0x10], ri[0x11] = gri[0xe], gri[0xf]
+			}
+		}
 		recs[common.RaceInfo] = ri
 	}
+	// The player slots in RaceMode are player ids, which stay as recorded.
 	if rm := frameAt(p.frames[common.RaceMode], ms); len(rm) >= 0x26 {
-		records.PutBits(rm, 41, 4, uint32(bot.aid)) // Player 1 slot.
-		rm[0x1c] = 0                                // Not disconnected.
+		rm[0x1c] = 0 // Not disconnected.
+		if g != nil {
+			if grm := frameAt(g.frames[common.RaceMode], ms); len(grm) >= 0x26 {
+				records.PutBits(rm, 39, 2, 2)                              // Two local players.
+				records.PutBits(rm, 80, 4, records.GetBits(grm, 41, 4))    // Player 2's slot,
+				records.PutBits(rm, 84, 22, records.GetBits(grm, 45, 22))  // finish time
+				records.PutBits(rm, 106, 13, records.GetBits(grm, 67, 13)) // and players ahead.
+				copy(rm[0x20:0x22], grm[0x1e:0x20])                        // Slow frames.
+			}
+		}
 		recs[common.RaceMode] = rm
 	}
 	recs[common.RaceData] = p.replayRaceData(ms)
-	if dest.mirror != nil {
-		if u := dest.mirror.records[common.User]; u != nil {
-			d := append([]byte{}, u...)
-			binary.BigEndian.PutUint32(d[0x0:], 1)
-			binary.BigEndian.PutUint64(d[0xa8:], botFriendCode(bot.aid))
-			recs[common.User] = d
+	if g != nil && recs[common.RaceData] != nil {
+		if grd := g.replayRaceData(ms); grd != nil {
+			recs[common.RaceData] = append(recs[common.RaceData], grd...)
 		}
+	}
+	// The recorded player's Mii, name and location. The friend code is the bot's: the
+	// watcher's own one would clash with theirs.
+	user := frameAt(p.frames[common.User], ms)
+	if len(user) != records.UserLen && dest.mirror != nil && dest.mirror.lastUser != nil {
+		user = append([]byte{}, dest.mirror.lastUser...)
+	}
+	if len(user) == records.UserLen {
+		binary.BigEndian.PutUint32(user[userPresentMiis:], 1)
+		if g != nil {
+			if gu := frameAt(g.frames[common.User], ms); len(gu) == records.UserLen {
+				copy(user[userMii2:userMii2+userMiiLen], gu[userMii1:userMii1+userMiiLen])
+				binary.BigEndian.PutUint32(user[userPresentMiis:], 0b11)
+			}
+		}
+		binary.BigEndian.PutUint64(user[userFriendCode:], botFriendCode(bot.aid))
+		recs[common.User] = user
 	}
 	// Recorded items and item events (throws, drops, hits), so the watcher's game shows them.
 	// ack_timer echoes the watcher's own item timer, as bots do.
