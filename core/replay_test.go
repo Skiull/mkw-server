@@ -171,3 +171,10 @@ func TestReplayEndsAfterLastFinish(t *testing.T) {
 		t.Fatalf("length %d", r.lengthMs)
 	}
 }
+
+func TestMapReplayAidEmptiesUnrecordedPlayers(t *testing.T) {
+	m := map[byte]byte{0: 3}
+	if mapReplayAid(m, 0) != 3 || mapReplayAid(m, 1) != records.NoAid || mapReplayAid(m, records.NoAid) != records.NoAid {
+		t.Fatal("wrong mapping")
+	}
+}

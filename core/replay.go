@@ -369,6 +369,19 @@ func frameAt(frames []replayFrame, ms int64) []byte {
 // Each bot sends its recorded player's RaceInfo, RaceMode and RaceData, with aids changed
 // from the recorded ones to the bots'.
 
+// mapReplayAid changes a recorded aid to the bot playing it. Aids nobody plays (test bots
+// in the recorded race, which aren't recorded) become empty: left as they were, one could
+// be the watcher's aid, and the watcher's game would think it's racing and drop out.
+func mapReplayAid(aidMap map[byte]byte, aid byte) byte {
+	if aid == records.NoAid {
+		return aid
+	}
+	if a, ok := aidMap[aid]; ok {
+		return a
+	}
+	return records.NoAid
+}
+
 // replayAidMap maps recorded aids to the bots playing them.
 func replayAidMap(seats map[byte]replaySeat) map[byte]byte {
 	m := map[byte]byte{}
@@ -438,9 +451,7 @@ func buildReplayPacket(bot *Aid, seat replaySeat, dest *Aid, aidMap map[byte]byt
 	if ri := frameAt(p.frames[common.RaceInfo], ms); len(ri) >= 0x24 {
 		binary.BigEndian.PutUint16(ri[0xc:], 0) // No lag.
 		for i := 0x18; i < 0x24; i++ {
-			if a, ok := aidMap[ri[i]]; ok {
-				ri[i] = a
-			}
+			ri[i] = mapReplayAid(aidMap, ri[i])
 		}
 		if g != nil {
 			// Player 2's vehicle and character.
@@ -462,9 +473,7 @@ func buildReplayPacket(bot *Aid, seat replaySeat, dest *Aid, aidMap map[byte]byt
 		}
 		binary.BigEndian.PutUint64(sel[0x8:], receiver)
 		for i := 0x28; i < 0x34; i++ {
-			if a, ok := aidMap[sel[i]]; ok {
-				sel[i] = a
-			}
+			sel[i] = mapReplayAid(aidMap, sel[i])
 		}
 		if a, ok := aidMap[sel[0x36]]; ok {
 			sel[0x36] = a // Winning vote.

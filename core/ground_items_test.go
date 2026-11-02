@@ -174,3 +174,20 @@ func TestOwnShellDestroyedBanana(t *testing.T) {
 		}
 	}
 }
+
+// Throwing a Banana forward and running into it a moment later destroys it far from where
+// it was predicted to land; driving over that spot later isn't a no-hit.
+func TestOwnFreshThrowHitIsRemoved(t *testing.T) {
+	setupRoom(t, flatCourse())
+	a := addTestAid(t, 0, false)
+	now := time.Now()
+	trackShot(a, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 0, 0}, Vel: [3]float32{0, 40, 100}}, now)
+	if len(groundItems) != 1 {
+		t.Fatalf("%d tracked", len(groundItems))
+	}
+	a.players[0].lastPos = [3]float32{0, 0, -9000} // Nowhere near the predicted landing.
+	removeHitItem(a, common.ObjBanana, now.Add(time.Second))
+	if len(groundItems) != 0 {
+		t.Fatal("fresh own Banana still tracked after a hit on it")
+	}
+}

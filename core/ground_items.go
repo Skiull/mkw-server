@@ -40,6 +40,8 @@ const (
 	// A drive-through expectation is dropped if the item turns out to have been destroyed
 	// by the player's shell this soon after (the reports can arrive in either order).
 	ownItemHitWindow = 1500 * time.Millisecond
+	// A hit reported on an item the player threw this recently removes it wherever it is.
+	ownThrowHitWindow = 3 * time.Second
 	hitReportSlack   = 400 // Position lag between touching an item and the report (a few frames at ~90 u/f).
 	droppedDistance  = 600 // Landing this close to the spawn point counts as a drop.
 )
@@ -144,6 +146,18 @@ func removeHitItem(a *Aid, obj common.ItemObject, now time.Time) {
 		if g.obj == obj {
 			if d := items.Distance(g.pos, p.lastPos); d < bestDist {
 				best, bestDist = i, d
+			}
+		}
+	}
+	// The player's own item, thrown moments ago, is likely still in the air (or just landed)
+	// nowhere near the predicted spot: a hit on it right after the throw removes it. The hit
+	// was an item running into it or the player catching it, not driving over it later.
+	if best < 0 {
+		for i := len(groundItems) - 1; i >= 0; i-- {
+			if g := groundItems[i]; g.obj == obj && g.owner == a && now.Sub(g.at) < ownThrowHitWindow {
+				groundItems = append(groundItems[:i], groundItems[i+1:]...)
+				logging.Log("Aid %d hit its own fresh %v: no longer tracked", a.aid, obj)
+				return
 			}
 		}
 	}
