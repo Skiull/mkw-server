@@ -496,7 +496,6 @@ func buildReplayPacket(bot *Aid, seat replaySeat, dest *Aid, aidMap map[byte]byt
 		for i := 0x18; i < 0x24; i++ {
 			ri[i] = mapReplayAid(aidMap, ri[i])
 		}
-		addWatcherSlot(ri[0x18:0x24], dest.aid)
 		if g != nil {
 			// Player 2's vehicle and character.
 			if gri := frameAt(g.frames[common.RaceInfo], ms); len(gri) >= 0x10 {
@@ -505,34 +504,12 @@ func buildReplayPacket(bot *Aid, seat replaySeat, dest *Aid, aidMap map[byte]byt
 		}
 		recs[common.RaceInfo] = ri
 	}
-	// The room's Select record as recorded (phase, course, player map), so a watcher joining
-	// sees a race in progress instead of the character select. Aids are the bots', and the
-	// clock fields are filled in like a live player's.
-	if sel := frameAt(p.frames[common.RoomSelect], ms); len(sel) == records.SelectLen {
-		epoch := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
-		binary.BigEndian.PutUint64(sel[0x0:], uint64(now.Sub(epoch).Milliseconds()))
-		var receiver uint64
-		if m := dest.mirror; m != nil && m.timeSender != 0 {
-			receiver = m.timeSender + uint64(now.Sub(m.timeAt).Milliseconds())
-		}
-		binary.BigEndian.PutUint64(sel[0x8:], receiver)
-		for i := 0x28; i < 0x34; i++ {
-			sel[i] = mapReplayAid(aidMap, sel[i])
-		}
-		addWatcherSlot(sel[0x28:0x34], dest.aid)
-		if a, ok := aidMap[sel[0x36]]; ok {
-			sel[0x36] = a // Winning vote.
-		}
-		if g != nil {
-			if gsel := frameAt(g.frames[common.RoomSelect], ms); len(gsel) == records.SelectLen {
-				copy(sel[0x18:0x20], gsel[0x10:0x18]) // The guest's spot, points, combo and rank,
-				sel[0x1e] = sel[0x16]                 // voting with player 1.
-			}
-		}
-		recs[common.RoomSelect] = sel
-	}
-	// The player slots in RaceMode are player ids, which stay as recorded.
+	// No Select record: sending the recorded one (its lobby phase) sent the watcher's game to
+	// "please wait a moment" and the vote instead of spectating.
+	// Player 1's slot is the bot's aid, as replays had it when they played to the end (keeping
+	// the recorded value broke them).
 	if rm := frameAt(p.frames[common.RaceMode], ms); len(rm) >= 0x26 {
+		records.PutBits(rm, 41, 4, uint32(bot.aid))
 		rm[0x1c] = 0 // Not disconnected.
 		if g != nil {
 			if grm := frameAt(g.frames[common.RaceMode], ms); len(grm) >= 0x26 {
