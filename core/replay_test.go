@@ -190,3 +190,34 @@ func TestAddWatcherSlot(t *testing.T) {
 		t.Fatalf("%v", slots)
 	}
 }
+
+// The room process is killed when the room closes, so a recording can end mid-stream: it
+// still reads up to its last flush.
+func TestCutOffRecordingStillLoads(t *testing.T) {
+	dir := t.TempDir()
+	setupRoom(t, Config{RecordDir: dir, RecordPackets: true})
+	a := addTestAid(t, 1, false)
+	a.raceStarted = true
+	a.mirror = &mirrorSource{}
+	now := time.Now()
+	startRecording(common.LuigiCircuit, now)
+	a.mirror.records[common.RaceData] = bytes.Repeat([]byte{5}, records.RaceDataLen)
+	recordPackets(a, now.Add(time.Second))
+	pktRec.w.Flush()
+	files, _ := filepath.Glob(filepath.Join(dir, "*", "*.pkt"))
+	data, _ := os.ReadFile(files[0]) // As left by a killed process: no gzip trailer.
+	cut := filepath.Join(dir, "cut.pkt")
+	os.WriteFile(cut, data, 0o644)
+	stopRecording(now.Add(2 * time.Second))
+	if data[0] != 0x1f || data[1] != 0x8b {
+		t.Fatalf("not gzip: %x", data[:2])
+	}
+
+	t.Cleanup(func() { replay = nil })
+	if err := LoadReplay(cut); err != nil {
+		t.Fatal(err)
+	}
+	if len(replay.players) != 1 || len(replay.players[0].raceData) != 1 {
+		t.Fatalf("%+v", replay.players)
+	}
+}

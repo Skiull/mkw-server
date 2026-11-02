@@ -2,6 +2,7 @@ package core
 
 import (
 	"bufio"
+	"compress/gzip"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -24,7 +25,7 @@ import (
 // a race the watcher was in and add one bot per player). Only the newest maxPacketRecordings
 // are kept, and a race isn't recorded when the disk is nearly full.
 //
-// .pkt layout: the magic, then frames of
+// .pkt layout (gzip-compressed): the magic, then frames of
 //
 //	u32 ms since the race started, u8 aid, u8 record type (common.RecordIdx), u16 length, data
 //
@@ -51,7 +52,8 @@ const (
 
 type packetRecording struct {
 	f       *os.File
-	w       *bufio.Writer
+	w       *gzip.Writer
+	pending int // Bytes written since the last flush.
 	base    string
 	course  common.Course
 	last    map[[2]int]string // aid, record type: last record written.
@@ -77,9 +79,10 @@ func startPacketRecording(base string, course common.Course) {
 		logging.Log("Can't create packet recording: %v", err)
 		return
 	}
-	pktRec = &packetRecording{f: f, w: bufio.NewWriterSize(f, 64*1024), base: base, course: course,
+	gz, _ := gzip.NewWriterLevel(f, gzip.DefaultCompression)
+	pktRec = &packetRecording{f: f, w: gz, base: base, course: course,
 		last: map[[2]int]string{}, players: map[byte]uint32{}}
-	pktRec.w.WriteString(replayMagic)
+	pktRec.w.Write([]byte(replayMagic))
 	prunePacketRecordings(room.config.RecordDir, maxPacketRecordings-1)
 }
 
@@ -103,7 +106,7 @@ func stopPacketRecording() {
 	if pktRec == nil {
 		return
 	}
-	pktRec.w.Flush()
+	pktRec.w.Close()
 	pktRec.f.Close()
 	pktRec = nil
 }
@@ -163,10 +166,13 @@ func writeRecords(aid byte, profileID uint32, recs [numRecordTypes][]byte, ms in
 		binary.BigEndian.PutUint16(hdr[6:], uint16(len(data)))
 		pktRec.w.Write(hdr[:])
 		pktRec.w.Write(data)
+		pktRec.pending += len(hdr) + len(data)
 	}
 	// The room process is killed when the room closes, so don't sit on much.
-	if pktRec.w.Buffered() > 32*1024 {
+	// Flushing ends a compressed block, so a file cut off there still reads up to it.
+	if pktRec.pending > 32*1024 {
 		pktRec.w.Flush()
+		pktRec.pending = 0
 	}
 }
 
@@ -222,7 +228,18 @@ func LoadReplay(path string) error {
 		return err
 	}
 	defer f.Close()
-	r, err := parseReplay(bufio.NewReader(f))
+	// Recordings are gzip-compressed (older ones aren't). A recording cut off when its room
+	// closed still reads up to its last flush.
+	br := bufio.NewReader(f)
+	var in io.Reader = br
+	if magic, _ := br.Peek(2); len(magic) == 2 && magic[0] == 0x1f && magic[1] == 0x8b {
+		gz, err := gzip.NewReader(br)
+		if err != nil {
+			return fmt.Errorf("%s: %w", path, err)
+		}
+		in = gz
+	}
+	r, err := parseReplay(in)
 	if err != nil {
 		return fmt.Errorf("%s: %w", path, err)
 	}
