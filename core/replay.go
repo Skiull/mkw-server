@@ -117,29 +117,46 @@ func recordPackets(a *Aid, now time.Time) {
 	if ms < 0 {
 		return
 	}
-	if profile, ok := pktRec.players[a.aid]; !ok || profile != a.profileID {
-		pktRec.players[a.aid] = a.profileID
+	var recs [numRecordTypes][]byte
+	for _, t := range replayRecordTypes {
+		recs[t] = a.mirror.records[t]
+	}
+	recs[common.User] = a.mirror.lastUser
+	recs[common.RoomSelect] = a.mirror.lastSelect
+	writeRecords(a.aid, a.profileID, recs, ms)
+}
+
+// recordBotPacket records a test bot's records like a player's, so a replay of a race with
+// test bots has everyone in it. Caller must hold mu.
+func recordBotPacket(bot *Aid, recs [numRecordTypes][]byte, now time.Time) {
+	if pktRec == nil || rec == nil {
+		return
+	}
+	if ms := rec.ms(now); ms >= 0 && recs[common.RaceData] != nil {
+		writeRecords(bot.aid, 0, recs, ms)
+	}
+}
+
+// writeRecords writes a player's records that changed since the last ones. Caller must hold
+// mu.
+func writeRecords(aid byte, profileID uint32, recs [numRecordTypes][]byte, ms int64) {
+	if profile, ok := pktRec.players[aid]; !ok || profile != profileID {
+		pktRec.players[aid] = profileID
 		pktRec.writePlayers()
 	}
 	for _, t := range replayRecordTypes {
-		data := a.mirror.records[t]
-		switch t {
-		case common.User:
-			data = a.mirror.lastUser
-		case common.RoomSelect:
-			data = a.mirror.lastSelect
-		}
+		data := recs[t]
 		if len(data) == 0 {
 			continue
 		}
-		key := [2]int{int(a.aid), int(t)}
+		key := [2]int{int(aid), int(t)}
 		if pktRec.last[key] == string(data) {
 			continue
 		}
 		pktRec.last[key] = string(data)
 		var hdr [8]byte
 		binary.BigEndian.PutUint32(hdr[0:], uint32(ms))
-		hdr[4], hdr[5] = a.aid, byte(t)
+		hdr[4], hdr[5] = aid, byte(t)
 		binary.BigEndian.PutUint16(hdr[6:], uint16(len(data)))
 		pktRec.w.Write(hdr[:])
 		pktRec.w.Write(data)

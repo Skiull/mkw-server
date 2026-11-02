@@ -351,6 +351,7 @@ func buildBotPacket(bot, ref, dest *Aid, now time.Time) []byte {
 		recs[common.Event] = d
 	}
 
+	recordBotPacket(bot, recs, now)
 	return encodeRacePacket(bot.aid, dest.aid, recs)
 }
 
