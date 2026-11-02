@@ -37,9 +37,10 @@ import (
 
 const replayMagic = "MKWRPL1\n"
 
-// Record types written to .pkt files. Select and Room records are left out. User (Miis,
-// names, location) is the player's latest one, which is usually sent before the race.
-var replayRecordTypes = []common.RecordIdx{common.User, common.RaceInfo, common.RaceMode, common.RaceData, common.Item, common.Event}
+// Record types written to .pkt files. Room records are left out. User (Miis, names,
+// location) and Select (room phase, course, player map) are the player's latest ones, which
+// may have been sent before the race.
+var replayRecordTypes = []common.RecordIdx{common.User, common.RoomSelect, common.RaceInfo, common.RaceMode, common.RaceData, common.Item, common.Event}
 
 // How many packet recordings to keep, and the free disk space needed to start one (a race
 // is a few MB).
@@ -122,8 +123,11 @@ func recordPackets(a *Aid, now time.Time) {
 	}
 	for _, t := range replayRecordTypes {
 		data := a.mirror.records[t]
-		if t == common.User {
+		switch t {
+		case common.User:
 			data = a.mirror.lastUser
+		case common.RoomSelect:
+			data = a.mirror.lastSelect
 		}
 		if len(data) == 0 {
 			continue
@@ -399,7 +403,7 @@ func replayPackets(now time.Time) []outgoing {
 			if dest.bot != nil || dest.kicked {
 				continue
 			}
-			out = append(out, outgoing{to: dest.addr, data: buildReplayPacket(bot, seat, dest, aidMap, ms)})
+			out = append(out, outgoing{to: dest.addr, data: buildReplayPacket(bot, seat, dest, aidMap, ms, now)})
 			bot.stats.sent++
 		}
 	}
@@ -415,7 +419,7 @@ const (
 	userFriendCode  = 0xa8
 )
 
-func buildReplayPacket(bot *Aid, seat replaySeat, dest *Aid, aidMap map[byte]byte, ms int64) []byte {
+func buildReplayPacket(bot *Aid, seat replaySeat, dest *Aid, aidMap map[byte]byte, ms int64, now time.Time) []byte {
 	p, g := seat.main, seat.guest
 	var recs [numRecordTypes][]byte
 	if ri := frameAt(p.frames[common.RaceInfo], ms); len(ri) >= 0x24 {
@@ -432,6 +436,33 @@ func buildReplayPacket(bot *Aid, seat replaySeat, dest *Aid, aidMap map[byte]byt
 			}
 		}
 		recs[common.RaceInfo] = ri
+	}
+	// The room's Select record as recorded (phase, course, player map), so a watcher joining
+	// sees a race in progress instead of the character select. Aids are the bots', and the
+	// clock fields are filled in like a live player's.
+	if sel := frameAt(p.frames[common.RoomSelect], ms); len(sel) == records.SelectLen {
+		epoch := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+		binary.BigEndian.PutUint64(sel[0x0:], uint64(now.Sub(epoch).Milliseconds()))
+		var receiver uint64
+		if m := dest.mirror; m != nil && m.timeSender != 0 {
+			receiver = m.timeSender + uint64(now.Sub(m.timeAt).Milliseconds())
+		}
+		binary.BigEndian.PutUint64(sel[0x8:], receiver)
+		for i := 0x28; i < 0x34; i++ {
+			if a, ok := aidMap[sel[i]]; ok {
+				sel[i] = a
+			}
+		}
+		if a, ok := aidMap[sel[0x36]]; ok {
+			sel[0x36] = a // Winning vote.
+		}
+		if g != nil {
+			if gsel := frameAt(g.frames[common.RoomSelect], ms); len(gsel) == records.SelectLen {
+				copy(sel[0x18:0x20], gsel[0x10:0x18]) // The guest's spot, points, combo and rank,
+				sel[0x1e] = sel[0x16]                 // voting with player 1.
+			}
+		}
+		recs[common.RoomSelect] = sel
 	}
 	// The player slots in RaceMode are player ids, which stay as recorded.
 	if rm := frameAt(p.frames[common.RaceMode], ms); len(rm) >= 0x26 {
