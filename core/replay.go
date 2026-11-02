@@ -399,6 +399,24 @@ func mapReplayAid(aidMap map[byte]byte, aid byte) byte {
 	return records.NoAid
 }
 
+// addWatcherSlot puts the watcher's aid in the first empty player slot of a player id ->
+// aid map. Replays only spectate properly when the watcher is in the race's map: early
+// replays worked because an unrecorded test bot's slot happened to hold the watcher's aid,
+// and they broke once unrecorded slots were emptied (or every slot was a recorded player).
+func addWatcherSlot(slots []byte, watcher byte) {
+	for _, a := range slots {
+		if a == watcher {
+			return
+		}
+	}
+	for i, a := range slots {
+		if a == records.NoAid {
+			slots[i] = watcher
+			return
+		}
+	}
+}
+
 // replayAidMap maps recorded aids to the bots playing them.
 func replayAidMap(seats map[byte]replaySeat) map[byte]byte {
 	m := map[byte]byte{}
@@ -470,6 +488,7 @@ func buildReplayPacket(bot *Aid, seat replaySeat, dest *Aid, aidMap map[byte]byt
 		for i := 0x18; i < 0x24; i++ {
 			ri[i] = mapReplayAid(aidMap, ri[i])
 		}
+		addWatcherSlot(ri[0x18:0x24], dest.aid)
 		if g != nil {
 			// Player 2's vehicle and character.
 			if gri := frameAt(g.frames[common.RaceInfo], ms); len(gri) >= 0x10 {
@@ -492,6 +511,7 @@ func buildReplayPacket(bot *Aid, seat replaySeat, dest *Aid, aidMap map[byte]byt
 		for i := 0x28; i < 0x34; i++ {
 			sel[i] = mapReplayAid(aidMap, sel[i])
 		}
+		addWatcherSlot(sel[0x28:0x34], dest.aid)
 		if a, ok := aidMap[sel[0x36]]; ok {
 			sel[0x36] = a // Winning vote.
 		}

@@ -201,3 +201,15 @@ func TestRecordingIncludesBots(t *testing.T) {
 		t.Fatalf("%+v", replay.players)
 	}
 }
+
+func TestAddWatcherSlot(t *testing.T) {
+	slots := []byte{0, 1, records.NoAid, records.NoAid}
+	addWatcherSlot(slots, 6)
+	if slots[2] != 6 || slots[3] != records.NoAid {
+		t.Fatalf("%v", slots)
+	}
+	addWatcherSlot(slots, 6) // Already there.
+	if slots[3] != records.NoAid {
+		t.Fatalf("%v", slots)
+	}
+}
