@@ -172,33 +172,10 @@ func TestReplayEndsAfterLastFinish(t *testing.T) {
 	}
 }
 
-func TestMapReplayAidEmptiesUnrecordedPlayers(t *testing.T) {
+func TestMapReplayAidKeepsUnrecordedPlayers(t *testing.T) {
 	m := map[byte]byte{0: 3}
-	if mapReplayAid(m, 0) != 3 || mapReplayAid(m, 1) != records.NoAid || mapReplayAid(m, records.NoAid) != records.NoAid {
+	if mapReplayAid(m, 0) != 3 || mapReplayAid(m, 1) != 1 || mapReplayAid(m, records.NoAid) != records.NoAid {
 		t.Fatal("wrong mapping")
-	}
-}
-
-// Test bots are recorded too, so a replay of a race against them has everyone.
-func TestRecordingIncludesBots(t *testing.T) {
-	dir := t.TempDir()
-	setupRoom(t, Config{RecordDir: dir, RecordPackets: true})
-	bot := addTestAid(t, 4, false)
-	bot.bot = newBotState(4)
-	now := time.Now()
-	startRecording(common.LuigiCircuit, now)
-	var recs [numRecordTypes][]byte
-	recs[common.RaceData] = bytes.Repeat([]byte{3}, records.RaceDataLen)
-	recordBotPacket(bot, recs, now.Add(time.Second))
-	stopRecording(now.Add(2 * time.Second))
-
-	files, _ := filepath.Glob(filepath.Join(dir, "*", "*.pkt"))
-	t.Cleanup(func() { replay = nil })
-	if err := LoadReplay(files[0]); err != nil {
-		t.Fatal(err)
-	}
-	if len(replay.players) != 1 || replay.players[0].aid != 4 || len(replay.players[0].raceData) != 1 {
-		t.Fatalf("%+v", replay.players)
 	}
 }
 

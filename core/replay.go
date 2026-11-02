@@ -126,10 +126,13 @@ func recordPackets(a *Aid, now time.Time) {
 	writeRecords(a.aid, a.profileID, recs, ms)
 }
 
-// recordBotPacket records a test bot's records like a player's, so a replay of a race with
-// test bots has everyone in it. Caller must hold mu.
+// Whether test bots are recorded. Off: replays show real players only.
+const recordTestBots = false
+
+// recordBotPacket records a test bot's records like a player's. Caller must hold mu.
 func recordBotPacket(bot *Aid, recs [numRecordTypes][]byte, now time.Time) {
-	if pktRec == nil || rec == nil {
+	// Test bots aren't shown in replays: not recorded.
+	if !recordTestBots || pktRec == nil || rec == nil {
 		return
 	}
 	if ms := rec.ms(now); ms >= 0 && recs[common.RaceData] != nil {
@@ -230,8 +233,16 @@ func LoadReplay(path string) error {
 		}
 		if json.Unmarshal(meta, &m) == nil {
 			r.course = common.Course(m.Course)
+			var real []*replayPlayer
 			for _, p := range r.players {
 				p.profile = m.Profiles[fmt.Sprint(p.aid)]
+				// Test bots (no profile) recorded for a while aren't shown.
+				if len(m.Profiles) == 0 || p.profile != 0 {
+					real = append(real, p)
+				}
+			}
+			if len(real) > 0 {
+				r.players = real
 			}
 		}
 	}
@@ -386,17 +397,14 @@ func frameAt(frames []replayFrame, ms int64) []byte {
 // Each bot sends its recorded player's RaceInfo, RaceMode and RaceData, with aids changed
 // from the recorded ones to the bots'.
 
-// mapReplayAid changes a recorded aid to the bot playing it. Aids nobody plays (test bots
-// in the recorded race, which aren't recorded) become empty: left as they were, one could
-// be the watcher's aid, and the watcher's game would think it's racing and drop out.
+// mapReplayAid changes a recorded aid to the bot playing it. Aids nobody plays (test bots in
+// the recorded race) stay as they were: replays spectate properly that way (emptying them
+// left the watcher on "please wait a moment").
 func mapReplayAid(aidMap map[byte]byte, aid byte) byte {
-	if aid == records.NoAid {
-		return aid
-	}
 	if a, ok := aidMap[aid]; ok {
 		return a
 	}
-	return records.NoAid
+	return aid
 }
 
 // addWatcherSlot puts the watcher's aid in the first empty player slot of a player id ->
