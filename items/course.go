@@ -19,6 +19,7 @@ type Course struct {
 	LeafPiles []LeafPile // Leaf piles that can drop items (Maple Treeway).
 	// Conveyor belt objects (Toad's Factory): items on them move.
 	Belts       [][3]float32
+	Hazards     []Hazard     // Objects that destroy items lying on the track (hazards.go).
 	Checkpoints *Checkpoints // Nil for battle arenas (no checkpoints).
 	Respawns    [][3]float32 // JGPT respawn points, by index.
 	Walls       *Walls       // Nil if course.kcl couldn't be read.
@@ -74,6 +75,9 @@ func parseCourse(szs []byte) (*Course, error) {
 		return nil, err
 	}
 	if c.Belts, err = kmpBelts(kmp); err != nil {
+		return nil, err
+	}
+	if c.Hazards, err = kmpHazards(kmp); err != nil {
 		return nil, err
 	}
 	if c.Respawns, err = kmpRespawns(kmp); err != nil {

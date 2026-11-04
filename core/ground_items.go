@@ -22,7 +22,7 @@ import (
 // game never reports the collision.
 
 const (
-	groundItemRadius    = 80  // Kart center to item, in course units.
+	groundItemRadius    = 60  // Kart center to item, in course units.
 	groundItemHeight    = 250 // Allowed height difference.
 	bananaGravity       = 1.05
 	fakeBoxGravity      = 1.2
@@ -42,8 +42,9 @@ const (
 	ownItemHitWindow = 1500 * time.Millisecond
 	// A hit reported on an item the player threw this recently removes it wherever it is.
 	ownThrowHitWindow = 3 * time.Second
-	hitReportSlack   = 400 // Position lag between touching an item and the report (a few frames at ~90 u/f).
-	droppedDistance  = 600 // Landing this close to the spawn point counts as a drop.
+	hitReportSlack    = 400  // Position lag between touching an item and the report (a few frames at ~90 u/f).
+	droppedDistance   = 600  // Landing this close to the spawn point counts as a drop.
+	maxThrowDistance  = 6000 // Items landing further from where they were thrown aren't tracked.
 )
 
 type groundItem struct {
@@ -93,9 +94,15 @@ func trackShot(a *Aid, s *records.Shot, now time.Time) {
 		// check a player's own report of hitting one.
 		reportOnly = math.Hypot(float64(s.Vel[0]), float64(s.Vel[2])) > fakeBoxDropMaxSpeed
 	}
-	pos, ok := c.Floors.Landing(s.Pos, s.Vel, g, itemRestHeight)
+	pos, ok := c.ThrowLanding(s.Pos, s.Vel, g, itemRestHeight)
 	if !ok {
-		return // Off the course.
+		return // Off the course, or it hits a wall on the way and bounces.
+	}
+	if items.Distance([3]float32{pos[0], 0, pos[2]}, [3]float32{s.Pos[0], 0, s.Pos[2]}) > maxThrowDistance {
+		return // Thrown far: the longer the arc, the less sure where it ends up.
+	}
+	if c.NearHazard(pos) {
+		return // A geyser, firebar, Thwomp, car... may destroy it unseen.
 	}
 	if ty, ok := c.Floors.At([3]float32{pos[0], pos[1] - itemRestHeight, pos[2]}); !ok || !items.ItemsStayPut(ty) {
 		return // Ice, water, conveyors: it won't stay there.

@@ -132,7 +132,7 @@ func TestThrownFakeItemBoxOnlyChecksReports(t *testing.T) {
 	owner := addTestAid(t, 0, false)
 	other := addTestAid(t, 1, false)
 	now := time.Now()
-	trackShot(owner, &records.Shot{Object: common.ObjFakeItemBox, Pos: [3]float32{0, 0, 0}, Vel: [3]float32{0, 50, 100}}, now)
+	trackShot(owner, &records.Shot{Object: common.ObjFakeItemBox, Pos: [3]float32{0, 0, 0}, Vel: [3]float32{0, 30, 90}}, now)
 	if len(groundItems) != 1 || !groundItems[0].reportOnly {
 		t.Fatal("thrown Fake Item Box not tracked for reports")
 	}
@@ -181,7 +181,7 @@ func TestOwnFreshThrowHitIsRemoved(t *testing.T) {
 	setupRoom(t, flatCourse())
 	a := addTestAid(t, 0, false)
 	now := time.Now()
-	trackShot(a, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 0, 0}, Vel: [3]float32{0, 40, 100}}, now)
+	trackShot(a, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 0, 0}, Vel: [3]float32{0, 10, 40}}, now)
 	if len(groundItems) != 1 {
 		t.Fatalf("%d tracked", len(groundItems))
 	}
@@ -189,5 +189,27 @@ func TestOwnFreshThrowHitIsRemoved(t *testing.T) {
 	removeHitItem(a, common.ObjBanana, now.Add(time.Second))
 	if len(groundItems) != 0 {
 		t.Fatal("fresh own Banana still tracked after a hit on it")
+	}
+}
+
+// Items aren't tracked where the server can't be sure they stay: near objects that destroy
+// them, or after a long throw.
+func TestUntrackedNearHazardsAndLongThrows(t *testing.T) {
+	cfg := flatCourse()
+	cfg.Courses[common.MarioCircuit].Hazards = []items.Hazard{{Pos: [3]float32{0, 0, 2000}, Reach: 1000}}
+	setupRoom(t, cfg)
+	a := addTestAid(t, 0, false)
+	now := time.Now()
+	trackShot(a, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 0, 1800}, Vel: [3]float32{-3, 7, -1}}, now)
+	if len(groundItems) != 0 {
+		t.Fatal("tracked a Banana dropped next to a geyser")
+	}
+	trackShot(a, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 0, -9000}, Vel: [3]float32{0, 40, -130}}, now)
+	if len(groundItems) != 0 {
+		t.Fatal("tracked a Banana thrown far")
+	}
+	trackShot(a, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 0, -6000}, Vel: [3]float32{-3, 7, -1}}, now)
+	if len(groundItems) != 1 {
+		t.Fatalf("%d tracked, want the plain drop", len(groundItems))
 	}
 }
