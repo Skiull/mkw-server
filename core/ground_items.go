@@ -61,7 +61,9 @@ type groundItem struct {
 
 // ownerGrace reports whether a's touching g is just its owner driving off a fresh drop.
 func (g *groundItem) ownerGrace(a *Aid, now time.Time) bool {
-	return g.dropped && g.owner == a && now.Sub(g.at) < ownItemGrace
+	// Any own fresh item: dropped ones are driven off, and forward tosses slower than the
+	// kart get overtaken right away (Shy Guy Beach 11-03 23:57: tossed at 32 u/f, driving 84).
+	return g.owner == a && now.Sub(g.at) < ownItemGrace
 }
 
 // Guarded by mu.

@@ -263,7 +263,8 @@ func LoadReplay(path string) error {
 			}
 		}
 	}
-	r.start = time.Now()
+	// The clock starts when the watcher arrives (replayPackets), not when the room opens:
+	// joining takes a while ("please wait a moment").
 	replay = r
 	logging.Log("Loaded replay %s: course %d, %d players", path, r.course, len(r.players))
 	return nil
@@ -465,7 +466,18 @@ const replayAfterFinish = 8 * time.Second
 // replayPackets builds one packet from every replay bot to every real player. Caller must
 // hold mu.
 func replayPackets(now time.Time) []outgoing {
-	ms := now.Sub(replay.start).Milliseconds()
+	if replay.start.IsZero() {
+		for _, a := range aids {
+			if a.bot == nil && a.mirror != nil && !a.mirror.lastAt.IsZero() {
+				replay.start = now
+				logging.Log("Watcher arrived: replay starts")
+			}
+		}
+	}
+	ms := int64(0)
+	if !replay.start.IsZero() {
+		ms = now.Sub(replay.start).Milliseconds()
+	}
 	if ms > replay.lengthMs+replayEndLinger.Milliseconds() && !replayEnded {
 		replayEnded = true
 		logging.Log("Replay finished. Closing the room")

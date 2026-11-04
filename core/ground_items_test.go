@@ -121,7 +121,13 @@ func TestOwnerHitsOwnThrownBanana(t *testing.T) {
 		t.Fatal("thrown Banana not tracked as thrown")
 	}
 	g := groundItems[0].pos
+	// Overtaking a fresh toss isn't checked (own-item grace)...
 	checkGroundItems(owner, p, [3]float32{g[0], 0, g[2] - 100}, [3]float32{g[0], 0, g[2] + 100}, now.Add(time.Second))
+	if len(hitExpectations) != 0 || len(groundItems) != 1 {
+		t.Fatal("owner overtaking their fresh Banana was checked")
+	}
+	// ...driving into it later is.
+	checkGroundItems(owner, p, [3]float32{g[0], 0, g[2] - 100}, [3]float32{g[0], 0, g[2] + 100}, now.Add(3*time.Second))
 	if len(hitExpectations) != 1 {
 		t.Fatal("owner driving into their thrown Banana not checked")
 	}
