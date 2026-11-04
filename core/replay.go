@@ -460,6 +460,12 @@ func replayAidMap(seats map[byte]replaySeat) map[byte]byte {
 // screen or another race, and the game would sit there forever.
 const replayEndLinger = 2 * time.Second
 
+// How long the watcher's game spends matchmaking after joining: replays start then.
+const (
+	replayJoinWait          = 10 * time.Second
+	replayJoinWaitPerPlayer = 2 * time.Second
+)
+
 // How long a replay runs after the last player finished.
 const replayAfterFinish = 8 * time.Second
 
@@ -469,13 +475,16 @@ func replayPackets(now time.Time) []outgoing {
 	if replay.start.IsZero() {
 		for _, a := range aids {
 			if a.bot == nil && a.mirror != nil && !a.mirror.lastAt.IsZero() {
-				replay.start = now
-				logging.Log("Watcher arrived: replay starts")
+				// The game's matchmaking screen (search bubbles, "opponents found") takes 10 s
+				// plus 2 s per other player: start the race as it ends.
+				wait := replayJoinWait + time.Duration(len(replay.players))*replayJoinWaitPerPlayer
+				replay.start = now.Add(wait)
+				logging.Log("Watcher arrived: replay starts in %v", wait)
 			}
 		}
 	}
 	ms := int64(0)
-	if !replay.start.IsZero() {
+	if !replay.start.IsZero() && now.After(replay.start) {
 		ms = now.Sub(replay.start).Milliseconds()
 	}
 	if ms > replay.lengthMs+replayEndLinger.Milliseconds() && !replayEnded {
