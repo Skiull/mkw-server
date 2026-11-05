@@ -33,7 +33,12 @@ Both messages travel over the same UDP socket as Race packets.
 - **Table:** online VS (table 4), online Balloon Battle (10) or online Coin Runners (11), picked from the game mode in the player's latest RaceInfo.
 - **Column, VS:** the player's rank from their latest RaceData. Rooms with fewer than 12 players are spread across all 12 columns, so 1st always gets 1st-place odds and last always gets 12th-place odds. The game also resamples its tables for small rooms; this formula approximates that until the exact one is confirmed.
 - **Column, battle:** how far the player is behind the leader, using battle scores from RaceMode (Balloon Battle: <3, 3–5, >5 points; Coin Runners: <4, 4–7, >7 coins). Coin Runners' RaceMode layout isn't decoded yet, so coin counts are always 0 for now.
-- **Limits:** after a strong item is handed out, it goes on a room-wide cooldown (defaults in `items.DefaultCooldowns`: Blue Shell, Lightning, POW and Thunder Cloud 30s, Blooper 15s). A roll that lands on an item on cooldown gives a Mushroom, the same thing the game does when its own limits block an item.
+- **Limits:** `items.DefaultLimits`, from Wexos's item tool (https://wexos.github.io/Tools/mkwitem.html). An item that isn't available is left out of the roll and the other chances are rescaled; if nothing in the column is available the player gets a Mushroom.
+  - First available (VS race clock): Blue Shell and Lightning 30s, POW 20s, Blooper 15s. The server starts the clock 5s after it sees the countdown start, so it never runs early.
+  - Room-wide cooldown after a pull: Lightning 30s, POW 20s, Blooper 15s. Blue Shell and Thunder Cloud have none.
+  - Max in play: Green 12, Red 8, Banana 16, Fake Item Box 6, Mushroom 12, Bob-omb 3, Blue 1, Lightning 1, Star 3, Golden 2, Mega 2, Blooper 1, POW 1, Thunder Cloud 1, Bullet Bill 1. The server counts items held, trailed, or granted and not yet shown; items already on the track or flying aren't visible to it.
+  - No Thunder Cloud for a player in a Star, Mega Mushroom or Bullet Bill (8 s, 8 s and 10 s after using one; a Lightning ends the Mega early). It's left out of the roll like any other unavailable item.
+  - A race's 16th, 18th, 20th and 21st+ item box per player always gives a Mushroom (the game's own rule, kept by the server). The game also swaps a pulled item for a Mushroom when its local view says too many are in play (the online "desync shroom"). The client replaces the game's roll with the server's item every frame, so neither happens with server items.
 - **Randomness:** each room's engine is seeded from `crypto/rand`.
 
 ## Enforcement

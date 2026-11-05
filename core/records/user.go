@@ -11,7 +11,7 @@ const UserLen = 0xc0
 const miiLen = 0x4c
 const userMaxMiiCount = 2
 
-// The game caps VR and BR at 9999.
+// The game caps BR at 9999 (VR too, but mogi rooms send LR in its place).
 const maxRankPoints = 9999
 
 // Region values in the User record.
@@ -41,13 +41,11 @@ func isValidGameRegion(c byte) bool {
 	}
 }
 
-// IsValidFriendCode checks a Wii friend code's checksum. The upper bits of a friend code
-// are derived from the profile id and game id, so a made-up friend code fails this check.
-// Mirrors wfc-server's common.CalcFriendCode.
-func IsValidFriendCode(fc uint64, gameId string) bool {
-	pid := uint32(fc)
+// CalcFriendCode returns the friend code for a profile id and game id. The upper bits are
+// a checksum of the profile id and game id. Mirrors wfc-server's common.CalcFriendCode.
+func CalcFriendCode(pid uint32, gameId string) uint64 {
 	if pid == 0 || len(gameId) != 4 {
-		return false
+		return 0
 	}
 
 	buffer := make([]byte, 8)
@@ -58,7 +56,21 @@ func IsValidFriendCode(fc uint64, gameId string) bool {
 	buffer[7] = gameId[0]
 
 	digest := md5.Sum(buffer)
-	return fc == uint64(pid)|(uint64(digest[0]&0xfe)<<31)
+	return uint64(pid) | (uint64(digest[0]&0xfe) << 31)
+}
+
+// IsValidFriendCode checks a Wii friend code's checksum, so a made-up friend code fails.
+func IsValidFriendCode(fc uint64, gameId string) bool {
+	return fc != 0 && fc == CalcFriendCode(uint32(fc), gameId)
+}
+
+func isValidMKWFriendCode(fc uint64) bool {
+	for _, region := range []string{"E", "P", "J", "K"} {
+		if IsValidFriendCode(fc, "RMC"+region) {
+			return true
+		}
+	}
+	return false
 }
 
 func ParseUser(data []byte, ctx *Context) (*User, error) {
@@ -109,15 +121,15 @@ func ParseUser(data []byte, ctx *Context) (*User, error) {
 		return nil, fmt.Errorf("invalid region (%d)", u.Region)
 	}
 
-	if u.VR > maxRankPoints {
-		return nil, fmt.Errorf("VR (%d) > %d", u.VR, maxRankPoints)
-	}
+	// VR isn't capped: mogi rooms send LR (up to 65535) in its place.
 
 	if u.BR > maxRankPoints {
 		return nil, fmt.Errorf("BR (%d) > %d", u.BR, maxRankPoints)
 	}
 
-	if !IsValidFriendCode(u.FriendCode, "RMC"+string(u.GameRegion)) {
+	// A friend code's checksum uses the game id the profile was made with, which doesn't
+	// have to match this record's region (seen with a real RMCJ friend code in an E/P game).
+	if !isValidMKWFriendCode(u.FriendCode) {
 		return nil, fmt.Errorf("invalid friend code (%d)", u.FriendCode)
 	}
 

@@ -1,11 +1,13 @@
 package core
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"sync"
 	"time"
 
+	"mkw-server/common"
 	"mkw-server/items"
 	"mkw-server/logging"
 	"mkw-server/util"
@@ -24,6 +26,23 @@ type Config struct {
 	ItemEngine *items.Engine
 	// Drop packets and strike aids whose items don't match what the server granted.
 	EnforceItems bool
+	// Kick right away (as cheating) anyone holding or using an item the server never granted.
+	KickItemCheats bool
+
+	// Folder for race recordings (recorder.go). Empty: off.
+	RecordDir string
+	// Also record raw race-state bytes when they change (diagnostics).
+	RecordRaw bool
+	// Also record each player's race records as sent, for in-game replays (replay.go).
+	RecordPackets bool
+	// Play this packet recording back with the room's bots instead of mirroring (replay.go).
+	ReplayFile string
+	// Replay bots run the recorded race themselves (from when the room opens) for a watcher
+	// who joins it in progress and spectates, instead of following the watcher's race.
+	ReplaySpectate bool
+
+	// Course layouts (item boxes, checkpoints, respawn points), from the game's files.
+	Courses map[common.Course]*items.Course
 }
 
 func DefaultConfig() Config {
@@ -86,6 +105,8 @@ func StartRoom() {
 
 	go readLoop()
 	go pingLoop()
+	go botLoop()
+	go challengeLoop()
 }
 
 func readLoop() {
@@ -114,7 +135,7 @@ func readLoop() {
 // handlePacket handles one datagram and returns the addresses it should be relayed to.
 // Caller must hold mu.
 func handlePacket(addr net.Addr, data []byte, now time.Time) []net.Addr {
-	a := aids[addr.String()]
+	a := aidForAddr(addr, data)
 	if a == nil {
 		logging.Log("Non-aid sent a packet. Address: %v", addr)
 		return nil
@@ -122,6 +143,12 @@ func handlePacket(addr net.Addr, data []byte, now time.Time) []net.Addr {
 
 	if a.kicked || len(data) == 0 {
 		return nil
+	}
+	a.stats.received++
+	if data[0] == RacePacketMagic && len(data) >= 0x10 {
+		a.stats.lastLengths = [8]byte(data[8:16])
+	} else if len(data) <= 8 {
+		a.stats.lastControl = string(data[:min(2, len(data))])
 	}
 
 	switch {
@@ -135,6 +162,18 @@ func handlePacket(addr net.Addr, data []byte, now time.Time) []net.Addr {
 		return nil
 	case isItemRequestPacket(data):
 		handleItemRequest(a, data, now)
+		return nil
+	case isLoginHashPacket(data):
+		handleLoginHash(a, data)
+		return nil
+	case isGameHashPacket(data):
+		handleGameHash(a, data, now)
+		return nil
+	case isChallengeReply(data):
+		handleChallengeReply(a, data)
+		return nil
+	case isDataChangesPacket(data):
+		handleDataChanges(a, data, now)
 		return nil
 	case data[0] != RacePacketMagic:
 		return nil
@@ -153,11 +192,18 @@ func handlePacket(addr net.Addr, data []byte, now time.Time) []net.Addr {
 
 	if room.config.ItemEngine != nil {
 		if err := observeItems(a, pkt, now); err != nil {
+			var ungranted *ungrantedItemError
+			if room.config.KickItemCheats && errors.As(err, &ungranted) {
+				logging.Log("Aid %d item cheat: %v", a.aid, err)
+				kick(a, KickCheating)
+				return nil
+			}
 			if room.config.EnforceItems {
 				strike(a, fmt.Sprintf("item violation: %v", err), now)
 				return nil
 			}
 			logging.Log("Aid %d item violation (not enforced): %v", a.aid, err)
+			recordFlag(a, "item violation: "+err.Error(), now)
 		}
 	}
 
@@ -170,13 +216,21 @@ func handlePacket(addr net.Addr, data []byte, now time.Time) []net.Addr {
 		handleAidStartedCountdown(a)
 	}
 
-	trackPlayerState(a, pkt)
+	trackPlayerState(a, pkt, now)
+	if a.raceStarted {
+		checkFinish(a, pkt, now)
+	}
+	trackMovement(a, pkt, now)
+	recordMirrorSource(a, data, pkt, now)
+	recordPackets(a, now)
 
+	a.stats.valid++
 	var relayTo []net.Addr
 	for _, dest := range *util.GetSendToAids(pkt.Destinations) {
 		to := getAid(dest)
 		// nil when someone left but wfc-server hasn't told the sender yet.
-		if to == nil || to.kicked {
+		// Bots are played by the server, so packets for them stop here.
+		if to == nil || to.kicked || to.bot != nil {
 			continue
 		}
 		relayTo = append(relayTo, to.addr)
@@ -204,19 +258,46 @@ func checkIdentity(a *Aid, pkt *RacePacket) error {
 
 // trackPlayerState records per-player state the server uses for item decisions.
 // Caller must hold mu.
-func trackPlayerState(a *Aid, pkt *RacePacket) {
+func trackPlayerState(a *Aid, pkt *RacePacket, now time.Time) {
 	if pkt.RaceInfo != nil {
 		started := pkt.IsCountdownStarted()
 		if started && !a.raceStarted {
+			if a.bot == nil && (rec == nil || now.Sub(rec.start) > 20*time.Second) {
+				startRecording(pkt.RaceInfo.Course(), now)
+			}
 			resetItemState(a)
+			resetMovement(a)
+			resetHitChecks()
+			resetProgress(a)
+			for _, b := range aids {
+				if b.bot != nil {
+					resetProgress(b)
+				}
+			}
+			a.raceStartedAt = time.Now()
 		}
 		a.raceStarted = started
 		a.mode = pkt.RaceInfo.GameMode()
+		a.course = pkt.RaceInfo.Course()
+		for i, p := range a.players {
+			p.vehicle, p.character = pkt.RaceInfo.Combo(i)
+		}
 	}
 
 	for i, rd := range pkt.RaceData {
 		if i < len(a.players) {
 			a.players[i].rank = rd.Rank
+			if rd.HasPosition() {
+				recordPosition(a.players[i], rd.WorldPos(), now)
+				checkLeafPiles(a, a.players[i], rd.WorldPos(), now)
+			}
+			if a.raceStarted {
+				var frame uint32
+				if pkt.RaceInfo != nil {
+					frame = pkt.RaceInfo.Frame()
+				}
+				trackProgress(a, i, rd, a.course, frame, now)
+			}
 		}
 	}
 
@@ -233,10 +314,15 @@ func trackPlayerState(a *Aid, pkt *RacePacket) {
 func pingLoop() {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
-	for range ticker.C {
+	lastStats := time.Now()
+	for now := range ticker.C {
 		mu.Lock()
+		if now.Sub(lastStats) >= statsInterval {
+			logStats(now.Sub(lastStats))
+			lastStats = now
+		}
 		for _, a := range aids {
-			if a == nil || a.kicked {
+			if a == nil || a.kicked || a.bot != nil {
 				continue
 			}
 			sendPing(a)
@@ -290,6 +376,7 @@ func RemoveAidFromRoom(aidAddr string) error {
 
 	room.aidBitmap = util.ClearAid(room.aidBitmap, a.aid)
 	delete(aids, aidAddr)
+	forgetLearnedAddrs(a)
 
 	logging.Log("Successfully removed aid %s (aid: %d). Aid count is %d", aidAddr, a.aid, len(aids))
 

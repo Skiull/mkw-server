@@ -41,7 +41,14 @@ func main() {
 	// Server-side item decisions need the client patch that asks mkw-server for items.
 	// See docs/server-item-decisions.md.
 	itemSlotPath := flag.String("item-slot", "", "Path to ItemSlot.bin. Enables server-side item decisions")
+	kickItemCheats := flag.Bool("kick-item-cheats", false, "Kick (as cheating) anyone holding or using an item the server never granted (requires --item-slot)")
+	recordRaw := flag.Bool("record-raw", false, "Diagnostics: also record raw race-state bytes whenever they change")
+	recordPackets := flag.Bool("record-packets", false, "Also save each player's race records as sent (<race>.pkt), for in-game replays (requires --record-dir)")
+	replaySpectate := flag.Bool("replay-spectate", false, "With --replay: the bots run the recorded race from when the room opens, for a watcher who joins it in progress")
+	replayFile := flag.String("replay", "", "Packet recording (.pkt) for the room's bots to play back instead of mirroring the live player")
+	recordDir := flag.String("record-dir", "", "Folder to save race recordings in (positions, items, flags per race)")
 	enforceItems := flag.Bool("enforce-items", false, "Drop packets whose items weren't granted by the server (requires --item-slot)")
+	courseDir := flag.String("course-dir", "", "Folder with the game's /Race/Course .szs files (course layouts)")
 
 	flag.Parse()
 
@@ -58,9 +65,10 @@ func main() {
 	logging.Log("Starting mkw-server. Room address=%s wfc-server address=%s\n", *roomAddr, *wfcAddr)
 
 	config := core.Config{
-		KickThreshold: *kickThreshold,
-		KickWindow:    *kickWindow,
-		EnforceItems:  *enforceItems,
+		KickThreshold:     *kickThreshold,
+		KickWindow:        *kickWindow,
+		EnforceItems:      *enforceItems,
+		KickItemCheats:    *kickItemCheats,
 	}
 
 	if *itemSlotPath != "" {
@@ -78,6 +86,26 @@ func main() {
 	} else if *enforceItems {
 		logging.Log("--enforce-items requires --item-slot")
 		os.Exit(1)
+	}
+
+	config.RecordDir = *recordDir
+	config.RecordRaw = *recordRaw
+	config.RecordPackets = *recordPackets
+	if *replayFile != "" {
+		if err := core.LoadReplay(*replayFile); err != nil {
+			logging.Log("Failed to load replay: %v", err)
+			os.Exit(1)
+		}
+		config.ReplayFile = *replayFile
+		config.ReplaySpectate = *replaySpectate
+	}
+	if *courseDir != "" {
+		courses, errs := items.LoadCourses(*courseDir)
+		for _, err := range errs {
+			logging.Log("Course files: %v", err)
+		}
+		config.Courses = courses
+		logging.Log("Loaded %d courses", len(courses))
 	}
 
 	err = controller.CreateController(*roomAddr, *wfcAddr, config)

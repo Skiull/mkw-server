@@ -3,6 +3,7 @@ package core
 import (
 	"crypto/md5"
 	"encoding/binary"
+	"fmt"
 	"hash/crc32"
 	"math"
 	"net"
@@ -26,6 +27,7 @@ func setupRoom(t *testing.T, config Config) {
 
 	room = &Room{conn: conn, addr: conn.LocalAddr().(*net.UDPAddr), config: config}
 	aids = make(map[string]*Aid)
+	learnedAddrs = make(map[string]*Aid)
 	kickHandler = nil
 }
 
@@ -313,7 +315,7 @@ func testItemSlot(item common.ItemType) *items.ItemSlot {
 
 func itemRoom(t *testing.T, item common.ItemType, enforce bool) (*Aid, *Aid) {
 	t.Helper()
-	engine, err := items.NewEngine(testItemSlot(item), map[common.ItemType]time.Duration{})
+	engine, err := items.NewEngine(testItemSlot(item), &items.Limits{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -349,12 +351,9 @@ func TestItemGrantAndEnforce(t *testing.T) {
 		t.Fatalf("got %v, want Banana", item)
 	}
 
-	// Retransmission gets the same answer; a new request while holding is refused.
+	// Retransmission gets the same answer.
 	if item := requestItem(t, a0, 2, now); item != common.Banana {
 		t.Fatalf("retransmit got %v", item)
-	}
-	if item := requestItem(t, a0, 3, now.Add(2*time.Second)); item != common.NoItem {
-		t.Fatalf("got %v while still holding an item", item)
 	}
 
 	// Holding the granted item is fine; holding anything else isn't.
@@ -362,6 +361,11 @@ func TestItemGrantAndEnforce(t *testing.T) {
 	ok.recs[recItem] = itemRec(common.Banana, common.NoItem)
 	if to := handle(a0, ok.build(), now); len(to) != 1 {
 		t.Fatal("packet holding the granted item was dropped")
+	}
+
+	// A new request while holding is refused.
+	if item := requestItem(t, a0, 3, now.Add(2*time.Second)); item != common.NoItem {
+		t.Fatalf("got %v while still holding an item", item)
 	}
 
 	hacked := racingPacket(0, 1<<1, 2)
@@ -394,6 +398,23 @@ func TestItemGrantAndEnforce(t *testing.T) {
 	}
 }
 
+// Using the last Mushroom as you touch an item box gets a new item: the ITEM record still
+// shows the Mushroom when the request arrives.
+func TestMushroomGlitch(t *testing.T) {
+	a0, _ := itemRoom(t, common.Mushroom, true)
+	now := time.Now()
+	handle(a0, racingPacket(0, 1<<1, 2).build(), now)
+	if item := requestItem(t, a0, 1, now); item != common.Mushroom {
+		t.Fatalf("got %v, want Mushroom", item)
+	}
+	held := racingPacket(0, 1<<1, 2)
+	held.recs[recItem] = itemRec(common.Mushroom, common.NoItem)
+	handle(a0, held.build(), now)
+	if item := requestItem(t, a0, 2, now.Add(3*time.Second)); item != common.Mushroom {
+		t.Fatalf("mushroom glitch got %v", item)
+	}
+}
+
 func TestItemViolationsLoggedWhenNotEnforced(t *testing.T) {
 	a0, _ := itemRoom(t, common.Banana, false)
 	b := racingPacket(0, 1<<1, 2)
@@ -410,5 +431,135 @@ func TestItemRequestForMissingGuest(t *testing.T) {
 	mu.Unlock()
 	if len(a0.strikes) != 1 {
 		t.Fatal("request for a guest the aid doesn't have wasn't struck")
+	}
+}
+
+// A Thunder Cloud held by another player makes the next pull a Mushroom (only TC in the
+// table), and once it's gone the next player can pull one straight away.
+func TestThunderCloudInPlay(t *testing.T) {
+	engine, err := items.NewEngine(testItemSlot(common.ThunderCloud), &items.Limits{
+		MaxInPlay: map[common.ItemType]int{common.ThunderCloud: 1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := DefaultConfig()
+	config.ItemEngine = engine
+	setupRoom(t, config)
+	a0, a1 := addTestAid(t, 0, false), addTestAid(t, 1, false)
+	a0.isRacer, a1.isRacer = true, true
+	now := time.Now()
+	handle(a0, racingPacket(0, 1<<1, 2).build(), now)
+	handle(a1, racingPacket(1, 1<<0, 2).build(), now)
+
+	holding := racingPacket(1, 1<<0, 2)
+	holding.recs[recItem] = itemRec(common.ThunderCloud, common.NoItem)
+	handle(a1, holding.build(), now)
+	if item := requestItem(t, a0, 1, now); item != common.Mushroom {
+		t.Fatalf("got %v while another player holds a Thunder Cloud", item)
+	}
+
+	gone := racingPacket(1, 1<<0, 2)
+	gone.recs[recItem] = itemRec(common.NoItem, common.NoItem)
+	handle(a1, gone.build(), now)
+	a0.players[0].grant = nil
+	if item := requestItem(t, a0, 2, now.Add(2*time.Second)); item != common.ThunderCloud {
+		t.Fatalf("got %v once the Thunder Cloud was gone", item)
+	}
+}
+
+func TestForcedMushroomBoxes(t *testing.T) {
+	var got []int
+	for box := 1; box <= 22; box++ {
+		if forcedMushroom(box) {
+			got = append(got, box)
+		}
+	}
+	want := []int{16, 18, 20, 21, 22}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("forced Mushroom on boxes %v, want %v", got, want)
+	}
+}
+
+func TestSixteenthBoxIsMushroom(t *testing.T) {
+	a0, _ := itemRoom(t, common.Banana, false)
+	now := time.Now()
+	handle(a0, racingPacket(0, 1<<1, 2).build(), now)
+	for box := 1; box <= 16; box++ {
+		a0.players[0].grant = nil
+		item := requestItem(t, a0, byte(box), now.Add(time.Duration(box)*2*time.Second))
+		want := common.Banana
+		if box == 16 {
+			want = common.Mushroom
+		}
+		if item != want {
+			t.Fatalf("box %d got %v, want %v", box, item, want)
+		}
+	}
+}
+
+func TestItemCheatKick(t *testing.T) {
+	a0, _ := itemRoom(t, common.Banana, false)
+	room.config.KickItemCheats = true
+	reasons := make(chan KickReason, 1)
+	SetKickHandler(func(_ *net.UDPAddr, _ byte, r KickReason) { reasons <- r })
+	defer SetKickHandler(nil)
+	now := time.Now()
+	handle(a0, racingPacket(0, 1<<1, 2).build(), now)
+
+	// Firing a Blue Shell nobody granted (e.g. a Banana turned into Blue Shells by a code).
+	fired := racingPacket(0, 1<<1, 2)
+	fired.recs[recItem] = itemRec(common.NoItem, common.NoItem)
+	fired.recs[recEvent] = eventRec(byte(common.EventUsed)<<5 | byte(common.ObjBlueShell))
+	if to := handle(a0, fired.build(), now); to != nil {
+		t.Fatal("packet with an ungranted Blue Shell was relayed")
+	}
+	if !a0.kicked {
+		t.Fatal("not kicked for an ungranted Blue Shell")
+	}
+	select {
+	case r := <-reasons:
+		if r != KickCheating {
+			t.Fatalf("kick reason %v, want cheating", r)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("wfc-server was never told about the kick")
+	}
+}
+
+func TestDraggedItemComingBack(t *testing.T) {
+	// Dragging the granted item, then it's back in the slot (Cataquack, a CPU hitting it,
+	// a cannon): still the granted item, not a cheat.
+	a0, _ := itemRoom(t, common.GreenShell, true)
+	room.config.KickItemCheats = true
+	now := time.Now()
+	handle(a0, racingPacket(0, 1<<1, 2).build(), now)
+	if item := requestItem(t, a0, 2, now); item != common.GreenShell {
+		t.Fatalf("got %v", item)
+	}
+	step := func(held, trailing common.ItemType, at time.Time) {
+		t.Helper()
+		pkt := racingPacket(0, 1<<1, 2)
+		pkt.recs[recItem] = itemRec(held, trailing)
+		if to := handle(a0, pkt.build(), at); len(to) != 1 || a0.kicked {
+			t.Fatalf("holding %v / trailing %v was treated as a cheat", held, trailing)
+		}
+	}
+	step(common.GreenShell, common.NoItem, now)
+	step(common.NoItem, common.GreenShell, now.Add(time.Second))
+	step(common.GreenShell, common.NoItem, now.Add(2*time.Second))
+	// Used, then shown again within a few seconds (slot looked empty for a moment).
+	step(common.NoItem, common.NoItem, now.Add(3*time.Second))
+	step(common.GreenShell, common.NoItem, now.Add(4*time.Second))
+
+	// Long after it was last seen, the same item appearing again is a cheat.
+	late := racingPacket(0, 1<<1, 2)
+	late.recs[recItem] = itemRec(common.NoItem, common.NoItem)
+	handle(a0, late.build(), now.Add(5*time.Second))
+	again := racingPacket(0, 1<<1, 2)
+	again.recs[recItem] = itemRec(common.GreenShell, common.NoItem)
+	handle(a0, again.build(), now.Add(30*time.Second))
+	if !a0.kicked {
+		t.Fatal("an item reappearing long after it was used wasn't caught")
 	}
 }

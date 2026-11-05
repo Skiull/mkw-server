@@ -26,10 +26,11 @@ const (
 	AddAid    = 0x01 // Request from wfc-server to add a aid
 	RemoveAid = 0x02 // Request from wfc-server to remove a aid
 	KickAid   = 0x03 // Request from wfc-server to kick a aid
+	AddBot    = 0x04 // Request from wfc-server to add a test bot
 )
 
 func (reqType RequestToMKWServer) valid() bool {
-	return reqType == AddAid || reqType == RemoveAid || reqType == KickAid
+	return reqType == AddAid || reqType == RemoveAid || reqType == KickAid || reqType == AddBot
 }
 
 type ResponseFromMKWServer uint8
@@ -133,6 +134,26 @@ func handleRequest(reqType RequestToMKWServer) {
 		err = handleRemoveAidRequest(req)
 		if err != nil {
 			logging.Log("Failed to handle RemoveAid for reason %s:", err.Error())
+		}
+
+	case AddBot:
+		// Same layout as AddAid. Only the address (as an id) and aid are used.
+		msg := make([]byte, AddAidRequestLength)
+		_, err := io.ReadFull(wfcTalker.conn, msg)
+		if err != nil {
+			logging.Log("Error reading AddBot data from wfc-server: %v", err)
+			return
+		}
+
+		req, err := unpackAddAidRequest(msg)
+		if err != nil {
+			logging.Log(err.Error())
+			return
+		}
+
+		addr := util.CreateUDPAddr(req.ip, req.port)
+		if err := core.AddBotToRoom(addr.String(), req.aid); err != nil {
+			logging.Log("Failed to handle AddBot: %v", err)
 		}
 
 	case KickAid:

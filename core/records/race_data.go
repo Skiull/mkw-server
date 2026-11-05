@@ -29,6 +29,24 @@ type RaceData struct {
 	data     [RaceDataLen]byte
 }
 
+// WorldPos is the player's position in course (KMP) units. From the community's protocol
+// docs (https://mkwiiki.org/wiki/Network_Protocol/RACEDATA): add 0x3f800000 to each 28 bit
+// value, read it as a float32, and subtract 1e6. Precision is 1/16 unit.
+func (r *RaceData) WorldPos() [3]float32 {
+	var p [3]float32
+	for i, v := range r.Position {
+		p[i] = math.Float32frombits(v+0x3f800000) - 1e6
+	}
+	return p
+}
+
+// HasPosition reports whether the record carries a real position. Before the player's kart
+// is placed at the start of a race, the position fields are all zero, which decodes to
+// about -1e6 on every axis.
+func (r *RaceData) HasPosition() bool {
+	return r.Position != [3]uint32{}
+}
+
 func ParseRaceData(data []byte) (*RaceData, error) {
 	if len(data) != RaceDataLen {
 		return nil, fmt.Errorf("size mismatch (%d != %d)", len(data), RaceDataLen)
@@ -93,3 +111,6 @@ func ParseRaceDataRecords(data []byte, ctx *Context) ([]*RaceData, error) {
 	}
 	return out, nil
 }
+
+// Raw returns the record's bytes (for diagnostics).
+func (r *RaceData) Raw() []byte { return r.data[:] }

@@ -13,6 +13,8 @@ type KickReason byte
 const (
 	KickInvalidPackets KickReason = iota + 1 // Kept sending packets that failed validation.
 	KickRequested                            // wfc-server asked for the kick.
+	KickCheating                             // Caught with something only a cheat can do.
+	KickBadVersion                           // Game code doesn't match a known client version.
 )
 
 func (r KickReason) String() string {
@@ -21,6 +23,10 @@ func (r KickReason) String() string {
 		return "invalid packets"
 	case KickRequested:
 		return "requested by wfc-server"
+	case KickCheating:
+		return "cheating"
+	case KickBadVersion:
+		return "unknown game version"
 	default:
 		return fmt.Sprintf("reason %d", byte(r))
 	}
@@ -69,6 +75,7 @@ func kick(a *Aid, reason KickReason) {
 	a.kicked = true
 	a.readyForCountdown = false
 	logging.Log("Kicked aid %d (%s): %s", a.aid, a.addr, reason)
+	recordFlag(a, fmt.Sprintf("kicked: %v", reason), time.Now())
 
 	// Remaining aids may now agree on the countdown state.
 	tryUpdateRoomCountdownState()

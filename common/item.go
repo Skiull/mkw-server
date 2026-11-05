@@ -1,5 +1,7 @@
 package common
 
+import "fmt"
+
 // ItemType is an inventory item, as used by ITEM records and ItemSlot.bin rows.
 type ItemType byte
 
@@ -164,4 +166,22 @@ func (a ItemEventAction) EventDataSize() int {
 // to interacting with someone else's.
 func (a ItemEventAction) IsOwnItem() bool {
 	return a == EventUsed || a == EventShot
+}
+
+func (o ItemObject) String() string {
+	names := [...]string{"GreenShell", "RedShell", "Banana", "Mushroom", "Star", "BlueShell",
+		"Lightning", "FakeItemBox", "MegaMushroom", "BobOmb", "Blooper", "POWBlock",
+		"GoldenMushroom", "BulletBill", "ThunderCloud"}
+	if int(o) < len(names) {
+		return names[o]
+	}
+	return fmt.Sprintf("object %d", int(o))
+}
+
+func (a ItemEventAction) String() string {
+	names := [...]string{"None", "Used", "Shot", "HitDragged", "HitFree", "Lose", "Unknown6", "Drop"}
+	if int(a) < len(names) {
+		return names[a]
+	}
+	return fmt.Sprintf("action %d", int(a))
 }

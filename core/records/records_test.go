@@ -270,7 +270,6 @@ func TestUserInvalid(t *testing.T) {
 		err    string
 	}{
 		{"forged friend code", func(d []byte) { d[0xa8+3] ^= 0x10 }, "invalid friend code"},
-		{"VR over cap", func(d []byte) { binary.BigEndian.PutUint16(d[0xb8:], 10000) }, "VR"},
 		{"guest Mii without guest", func(d []byte) { binary.BigEndian.PutUint32(d[0x0:], 3) }, "guest Mii"},
 		{"bad region", func(d []byte) { d[0xbd] = 9 }, "invalid region"},
 		{"bad game region", func(d []byte) { d[0xbc] = 'X' }, "game region"},
@@ -352,4 +351,28 @@ func TestEventInvalid(t *testing.T) {
 	d[2] = 0x0f
 	_, err = ParseEvent(d)
 	expectErr(t, err, "invalid object")
+}
+
+// A friend code whose checksum is for RMCJ, sent in a record whose region byte is E. It
+// must be accepted.
+func TestUserFriendCodeFromOtherRegion(t *testing.T) {
+	d := validUser()
+	fc := friendCode(1, "RMCJ")
+	if fc == friendCode(1, "RMCE") {
+		t.Fatal("test friend code has the same checksum in both regions")
+	}
+	binary.BigEndian.PutUint64(d[0xa8:], fc)
+	if _, err := ParseUser(d, soloCtx()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWorldPos(t *testing.T) {
+	enc := func(f float32) uint32 { return math.Float32bits(f+1e6) - 0x3f800000 }
+	// 0x9f42400 is 0.0 (positions are in 1/16 units around it).
+	r := RaceData{Position: [3]uint32{0x9f42400, enc(1234.5), enc(-20000)}}
+	p := r.WorldPos()
+	if p[0] != 0 || math.Abs(float64(p[1]-1234.5)) > 0.1 || math.Abs(float64(p[2]+20000)) > 0.1 {
+		t.Fatalf("WorldPos = %v", p)
+	}
 }

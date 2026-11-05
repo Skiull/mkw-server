@@ -38,7 +38,21 @@ type Aid struct {
 
 	// Game mode and whether the race is underway, from the latest RaceInfo.
 	mode        common.GameMode
+	course      common.Course
 	raceStarted bool
+	// When this aid's race countdown started, for items locked at the start of a race.
+	raceStartedAt time.Time
+
+	// Logged-in profile ID from wfc-server. 0 if unknown.
+	profileID uint32
+
+	// Set for test bots, which the server plays itself.
+	bot *botState
+	// A real player's recent packets, mirrored by test bots.
+	mirror *mirrorSource
+
+	// Traffic counters for the periodic stats log.
+	stats aidStats
 
 	// Previous packet's EVENT slot bytes, to spot newly added item events.
 	lastEventSlots [records.EventSlotCount]byte

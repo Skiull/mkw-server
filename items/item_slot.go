@@ -29,12 +29,18 @@ func (t *Table) Columns() int {
 }
 
 // ItemSlot is a parsed ItemSlot.bin (from /Race/Common.szs).
+// LoadItemSlot reads either file.
 type ItemSlot struct {
 	Tables []Table
 }
 
 func LoadItemSlot(path string) (*ItemSlot, error) {
 	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	// Accept the game's /Race/Common.szs as well as an extracted ItemSlot.bin.
+	data, err = extractItemSlot(data)
 	if err != nil {
 		return nil, err
 	}
