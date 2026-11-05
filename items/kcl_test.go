@@ -39,3 +39,15 @@ func TestWallsOneWay(t *testing.T) {
 		t.Fatal("going up through a ceiling wasn't caught")
 	}
 }
+
+func TestWallsCrossesIgnoresGrazing(t *testing.T) {
+	w := &Walls{cells: map[[2]int32][]int32{}}
+	w.add([3][3]float32{{1000, 0, -500}, {1000, 1000, -500}, {1000, 0, 500}})
+	w.Norms = append(w.Norms, [3]float32{-1, 0, 0}) // Front side faces -x.
+	if _, hit := w.Crosses([3]float32{985, 100, 0}, [3]float32{1020, 100, 0}); hit {
+		t.Fatal("ending 20 units behind the wall counted as passing through")
+	}
+	if _, hit := w.Crosses([3]float32{950, 100, 0}, [3]float32{1100, 100, 0}); !hit {
+		t.Fatal("ending 100 units behind the wall wasn't caught")
+	}
+}

@@ -19,6 +19,9 @@ type Walls struct {
 
 const wallCellSize = 512
 
+// How far behind a wall's surface a move has to end to count as passing through it.
+const wallGrazeDepth = 60
+
 // KCL base types (flag & 0x1f) that stop players. Weak, special and half-pipe walls are left
 // out: their behavior isn't documented well enough to rule out false alarms.
 var playerWallTypes = map[uint16]bool{
@@ -147,9 +150,16 @@ func (w *Walls) Crosses(a, b [3]float32) (int, bool) {
 				if int(i) < len(w.Norms) && dot3(sub3(b, a), w.Norms[i]) >= 0 {
 					continue
 				}
-				if segmentHitsTriangle(a, b, w.Tris[i]) {
-					return int(i), true
+				if !segmentHitsTriangle(a, b, w.Tris[i]) {
+					continue
 				}
+				// Grazing: ending only a little behind the wall's surface is the kart's body
+				// rubbing along it at speed (DK Mountain's slope after the cannon, 11-04),
+				// not passing through it.
+				if int(i) < len(w.Norms) && -dot3(sub3(b, w.Tris[i][0]), w.Norms[i]) < wallGrazeDepth {
+					continue
+				}
+				return int(i), true
 			}
 		}
 	}
