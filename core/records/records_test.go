@@ -270,7 +270,6 @@ func TestUserInvalid(t *testing.T) {
 		err    string
 	}{
 		{"forged friend code", func(d []byte) { d[0xa8+3] ^= 0x10 }, "invalid friend code"},
-		{"VR over cap", func(d []byte) { binary.BigEndian.PutUint16(d[0xb8:], 10000) }, "VR"},
 		{"guest Mii without guest", func(d []byte) { binary.BigEndian.PutUint32(d[0x0:], 3) }, "guest Mii"},
 		{"bad region", func(d []byte) { d[0xbd] = 9 }, "invalid region"},
 		{"bad game region", func(d []byte) { d[0xbc] = 'X' }, "game region"},

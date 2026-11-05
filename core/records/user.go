@@ -121,9 +121,7 @@ func ParseUser(data []byte, ctx *Context) (*User, error) {
 		return nil, fmt.Errorf("invalid region (%d)", u.Region)
 	}
 
-	if u.VR > maxRankPoints {
-		return nil, fmt.Errorf("VR (%d) > %d", u.VR, maxRankPoints)
-	}
+	// VR isn't capped: mogi rooms show LR (up to 65535) in its place.
 
 	if u.BR > maxRankPoints {
 		return nil, fmt.Errorf("BR (%d) > %d", u.BR, maxRankPoints)
