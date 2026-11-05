@@ -64,3 +64,13 @@ func (c Course) IsValid(r RecordIdx) bool {
 	}
 	return false
 }
+
+// IsRaceCourse reports whether c is one of the 32 race courses.
+func (c Course) IsRaceCourse() bool {
+	return c >= MarioCircuit && c <= RShyGuyBeach
+}
+
+// IsBattleCourse reports whether c is one of the 10 battle arenas.
+func (c Course) IsBattleCourse() bool {
+	return c >= DelfinoPier && c <= N64Skyscraper
+}

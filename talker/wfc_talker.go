@@ -25,10 +25,12 @@ type RequestToMKWServer uint8
 const (
 	AddAid    = 0x01 // Request from wfc-server to add a aid
 	RemoveAid = 0x02 // Request from wfc-server to remove a aid
+	KickAid   = 0x03 // Request from wfc-server to kick a aid
+	AddBot    = 0x04 // Request from wfc-server to add a test bot
 )
 
 func (reqType RequestToMKWServer) valid() bool {
-	return reqType == AddAid || reqType == RemoveAid
+	return reqType == AddAid || reqType == RemoveAid || reqType == KickAid || reqType == AddBot
 }
 
 type ResponseFromMKWServer uint8
@@ -36,6 +38,7 @@ type ResponseFromMKWServer uint8
 const (
 	Ready        = 0x00 // Response to wfc-server informing room is ready for aids
 	JoinAccepted = 0x01 // Response to wfc-server confirming a successful AddAid
+	AidKicked    = 0x02 // Informs wfc-server that mkw-server kicked a aid
 	Log          = 0xff // Informs wfc-server of a mkw-server log
 )
 
@@ -110,6 +113,7 @@ func handleRequest(reqType RequestToMKWServer) {
 		err = handleAddAidRequest(req)
 		if err != nil {
 			logging.Log("Failed to handle AddAid for reason %s:", err.Error())
+			return
 		}
 		logging.Log("Successfully handled AddAid for aid %s", util.FormatIPPort(req.ip, req.port))
 
@@ -130,6 +134,45 @@ func handleRequest(reqType RequestToMKWServer) {
 		err = handleRemoveAidRequest(req)
 		if err != nil {
 			logging.Log("Failed to handle RemoveAid for reason %s:", err.Error())
+		}
+
+	case AddBot:
+		// Same layout as AddAid. Only the address (as an id) and aid are used.
+		msg := make([]byte, AddAidRequestLength)
+		_, err := io.ReadFull(wfcTalker.conn, msg)
+		if err != nil {
+			logging.Log("Error reading AddBot data from wfc-server: %v", err)
+			return
+		}
+
+		req, err := unpackAddAidRequest(msg)
+		if err != nil {
+			logging.Log(err.Error())
+			return
+		}
+
+		addr := util.CreateUDPAddr(req.ip, req.port)
+		if err := core.AddBotToRoom(addr.String(), req.aid); err != nil {
+			logging.Log("Failed to handle AddBot: %v", err)
+		}
+
+	case KickAid:
+		msg := make([]byte, KickAidRequestLength)
+		_, err := io.ReadFull(wfcTalker.conn, msg)
+		if err != nil {
+			logging.Log("Error reading KickAid data from wfc-server: %v", err)
+			return
+		}
+
+		req, err := unpackKickAidRequest(msg)
+		if err != nil {
+			logging.Log("Unable to unpack KickAid for reason %s", err.Error())
+			return
+		}
+
+		err = handleKickAidRequest(req)
+		if err != nil {
+			logging.Log("Failed to handle KickAid for reason %s:", err.Error())
 		}
 
 	default:

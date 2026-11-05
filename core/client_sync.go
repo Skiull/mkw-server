@@ -1,7 +1,6 @@
 package core
 
 import (
-	"encoding/binary"
 	"time"
 
 	"mkw-server/logging"
@@ -16,25 +15,6 @@ const pingTimePacket = "PT"
 
 func isReadyPacket(data []byte) bool {
 	return string(data) == readyPacket
-}
-
-// Check RH1.timeSinceCountdown. This will be non-zero if the countdown started.
-// TODO: Rewrite when Race packet parsing is implemented.
-func hasCountdownStarted(data []byte) bool {
-	// Need to check packet is at least len(Header) + len(RH1) (0x10 + 0x28).
-	if len(data) < 0x38 {
-		return false
-	}
-
-	// Offset 0x9 is the Select Record record size field in the Header record.
-	// Need to check that the size is exactly 0x28.
-	if data[0x9] != 0x28 {
-		return false
-	}
-
-	// timeSinceCountdown is the first field in RH1.
-	timeSinceCountdown := binary.BigEndian.Uint32(data[0x10:0x14])
-	return timeSinceCountdown != 0
 }
 
 func handleAidReady(a *Aid) {
@@ -58,12 +38,13 @@ func handleAidStartedCountdown(a *Aid) {
 	tryUpdateRoomCountdownState()
 }
 
+// Caller must hold mu.
 func tryUpdateRoomCountdownState() {
 	firstAid := false
 	unanimousState := false
 
-	for addr, a := range aids {
-		if addr == "" || a == nil {
+	for _, a := range aids {
+		if a == nil || a.kicked {
 			continue
 		}
 
@@ -97,26 +78,27 @@ func tryUpdateRoomCountdownState() {
 	}
 }
 
+// Caller must hold mu.
 func beginSendStart() {
 	maxLatency := getMaxLatency()
 	for _, a := range aids {
-		if a == nil || !a.isRacer {
+		if a == nil || !a.isRacer || a.kicked {
 			continue
 		}
 
+		// Copy what the goroutine needs, since it runs without mu.
+		aid, addr, delay := a.aid, a.addr, maxLatency-a.latency
+		logging.Log("Sending aid %d Start after %v time", aid, delay)
+
 		// Start a goroutine for each aid to send with a delay
-		go func(aid *Aid) {
-			delay := maxLatency - aid.latency
-			logging.Log("Sending aid %d Start after %v time", aid.aid, delay)
+		go func() {
 			time.Sleep(delay)
 
-			_, err := room.conn.WriteTo([]byte(startPacket), aid.addr)
+			_, err := room.conn.WriteTo([]byte(startPacket), addr)
 			if err != nil {
-				logging.Log("Error sending Start to aid %d: %v", aid.aid, err)
-				return
+				logging.Log("Error sending Start to aid %d: %v", aid, err)
 			}
-
-		}(a)
+		}()
 	}
 }
 
@@ -138,7 +120,7 @@ func handlePongPacket(a *Aid) {
 		return
 	}
 
-	a.latencySum += time.Since(a.lastPingSent)
+	a.latencySum += elapsed
 	a.latencyCount++
 	a.latency = a.latencySum / time.Duration(a.latencyCount)
 	sendPingTimePacket(a)

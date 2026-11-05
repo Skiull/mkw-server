@@ -1,48 +1,88 @@
 package core
 
 import (
-	"encoding/binary"
+	"errors"
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
+	"mkw-server/common"
+	"mkw-server/items"
 	"mkw-server/logging"
 	"mkw-server/util"
 )
 
-// WFCTalkerInterface allows Room/Aid to interact with WFC without circular dependency
-type WFCTalkerInterface interface {
-	SendPacketDataToWFC(data []byte) error
+const RacePacketMagic uint8 = 0xb
+
+// Config holds the server-authority settings for a room.
+type Config struct {
+	// An aid is kicked after KickThreshold invalid packets within KickWindow.
+	// 0 disables automatic kicks (invalid packets are still dropped).
+	KickThreshold int
+	KickWindow    time.Duration
+
+	// Server-side item decisions. Nil leaves items to the clients (vanilla behavior).
+	ItemEngine *items.Engine
+	// Drop packets and strike aids whose items don't match what the server granted.
+	EnforceItems bool
+	// Kick right away (as cheating) anyone holding or using an item the server never granted.
+	KickItemCheats bool
+
+	// Folder for race recordings (recorder.go). Empty: off.
+	RecordDir string
+	// Also record raw race-state bytes when they change (diagnostics).
+	RecordRaw bool
+	// Also record each player's race records as sent, for in-game replays (replay.go).
+	RecordPackets bool
+	// Play this packet recording back with the room's bots instead of mirroring (replay.go).
+	ReplayFile string
+	// Replay bots run the recorded race themselves (from when the room opens) for a watcher
+	// who joins it in progress and spectates, instead of following the watcher's race.
+	ReplaySpectate bool
+
+	// Course layouts (item boxes, checkpoints, respawn points), from the game's files.
+	Courses map[common.Course]*items.Course
+}
+
+func DefaultConfig() Config {
+	return Config{
+		KickThreshold: 30,
+		KickWindow:    10 * time.Second,
+	}
 }
 
 type Room struct {
-
-	// UDP connection for the room, all aids send/receive from this (hopefully this won't a large bottleneck with 12 aids)
-	conn      net.PacketConn
-	addr      *net.UDPAddr
-	broadcast chan Packet // channel for broadcasting packets to all aids
+	// UDP connection for the room. All aids send to and receive from it.
+	conn net.PacketConn
+	addr *net.UDPAddr
 
 	aidBitmap uint32
 
 	// Indicates if the countdown can start. Set when all aids are ready and reset when
 	// all aids started the countdown.
 	countdownState bool
+
+	config Config
 }
 
 var room *Room
 
-func InitRoom(roomAddr *net.UDPAddr) error {
+// mu guards room state and every Aid/Player. Packets are handled one at a time on the read
+// goroutine, while wfc-server requests, pings and the countdown run on others.
+var mu sync.Mutex
+
+func InitRoom(roomAddr *net.UDPAddr, config Config) error {
 	room = &Room{
-		addr:    roomAddr,
-		// 256 came out of nowhere, needs to be tested
-		broadcast: make(chan Packet, 256),
+		addr:   roomAddr,
+		config: config,
 	}
 
-	logging.Log("Room created successfully!", roomAddr.String())
+	logging.Log("Room created successfully! %s", roomAddr.String())
 	return nil
 }
 
-// Starts the listener and broadcaster goroutines
+// Starts the listener and ping goroutines
 func StartRoom() {
 	if room.addr == nil {
 		logging.Log("Room address is nil, cannot start room")
@@ -64,12 +104,13 @@ func StartRoom() {
 	room.conn = conn
 
 	go readLoop()
-	go broadcastLoop()
 	go pingLoop()
+	go botLoop()
+	go challengeLoop()
 }
 
 func readLoop() {
-	buf := make([]byte, 512)
+	buf := make([]byte, 2048)
 	for {
 		n, addr, err := room.conn.ReadFrom(buf)
 		if err != nil {
@@ -77,93 +118,193 @@ func readLoop() {
 			return
 		}
 
-		a := aids[addr.String()]
-		if a == nil {
-			logging.Log("Non-aid sent a packet. Address: %v", addr)
-			continue
-		}
+		data := append([]byte{}, buf[:n]...)
 
-		pkt := Packet{
-			sender:       addr,
-			aid:       a,
-			data:         append([]byte{}, buf[:n]...),
-			receivedTime: time.Now(),
-		}
+		mu.Lock()
+		relayTo := handlePacket(addr, data, time.Now())
+		mu.Unlock()
 
-		handlePacket(&pkt)
+		for _, to := range relayTo {
+			if _, err := room.conn.WriteTo(data, to); err != nil {
+				logging.Log("Error relaying to %v: %v", to, err)
+			}
+		}
 	}
 }
 
-func handlePacket(pkt *Packet) {
-	data := pkt.data
-	a := pkt.aid
-
-	if !a.readyForCountdown && isReadyPacket(data) {
-		handleAidReady(a)
-		return
+// handlePacket handles one datagram and returns the addresses it should be relayed to.
+// Caller must hold mu.
+func handlePacket(addr net.Addr, data []byte, now time.Time) []net.Addr {
+	a := aidForAddr(addr, data)
+	if a == nil {
+		logging.Log("Non-aid sent a packet. Address: %v", addr)
+		return nil
 	}
 
-	if a.readyForCountdown && hasCountdownStarted(data) {
-		handleAidStartedCountdown(a)
-		return
+	if a.kicked || len(data) == 0 {
+		return nil
+	}
+	a.stats.received++
+	if data[0] == RacePacketMagic && len(data) >= 0x10 {
+		a.stats.lastLengths = [8]byte(data[8:16])
+	} else if len(data) <= 8 {
+		a.stats.lastControl = string(data[:min(2, len(data))])
 	}
 
-	if isPongPacket(data) {
+	switch {
+	case isReadyPacket(data):
+		if !a.readyForCountdown {
+			handleAidReady(a)
+		}
+		return nil
+	case isPongPacket(data):
 		handlePongPacket(a)
-		return
+		return nil
+	case isItemRequestPacket(data):
+		handleItemRequest(a, data, now)
+		return nil
+	case isLoginHashPacket(data):
+		handleLoginHash(a, data)
+		return nil
+	case isGameHashPacket(data):
+		handleGameHash(a, data, now)
+		return nil
+	case isChallengeReply(data):
+		handleChallengeReply(a, data)
+		return nil
+	case isDataChangesPacket(data):
+		handleDataChanges(a, data, now)
+		return nil
+	case data[0] != RacePacketMagic:
+		return nil
 	}
 
-	if data[0] == RacePacketMagic {
-		room.broadcast <- *pkt
+	pkt, err := parseRacePacket(data, a.context())
+	if err != nil {
+		strike(a, fmt.Sprintf("invalid Race packet: %v", err), now)
+		return nil
 	}
+
+	if err := checkIdentity(a, pkt); err != nil {
+		strike(a, err.Error(), now)
+		return nil
+	}
+
+	if room.config.ItemEngine != nil {
+		if err := observeItems(a, pkt, now); err != nil {
+			var ungranted *ungrantedItemError
+			if room.config.KickItemCheats && errors.As(err, &ungranted) {
+				logging.Log("Aid %d item cheat: %v", a.aid, err)
+				kick(a, KickCheating)
+				return nil
+			}
+			if room.config.EnforceItems {
+				strike(a, fmt.Sprintf("item violation: %v", err), now)
+				return nil
+			}
+			logging.Log("Aid %d item violation (not enforced): %v", a.aid, err)
+			recordFlag(a, "item violation: "+err.Error(), now)
+		}
+	}
+
+	if !a.isRacer && pkt.Select != nil {
+		logging.Log("Aid %d sent select!", a.aid)
+		a.isRacer = true
+	}
+
+	if a.readyForCountdown && pkt.IsCountdownStarted() {
+		handleAidStartedCountdown(a)
+	}
+
+	trackPlayerState(a, pkt, now)
+	if a.raceStarted {
+		checkFinish(a, pkt, now)
+	}
+	trackMovement(a, pkt, now)
+	recordMirrorSource(a, data, pkt, now)
+	recordPackets(a, now)
+
+	a.stats.valid++
+	var relayTo []net.Addr
+	for _, dest := range *util.GetSendToAids(pkt.Destinations) {
+		to := getAid(dest)
+		// nil when someone left but wfc-server hasn't told the sender yet.
+		// Bots are played by the server, so packets for them stop here.
+		if to == nil || to.kicked || to.bot != nil {
+			continue
+		}
+		relayTo = append(relayTo, to.addr)
+	}
+	return relayTo
 }
 
-func broadcastLoop() {
-	for pkt := range room.broadcast {
-		sender := aids[pkt.sender.String()]
+// checkIdentity pins an aid's friend code to the first one it reports, so a client can't
+// impersonate someone else partway through a session. Caller must hold mu.
+func checkIdentity(a *Aid, pkt *RacePacket) error {
+	if pkt.User == nil {
+		return nil
+	}
 
-		// sender can be nil if they disconnect between sending the packet and the broadcast
-		if sender == nil {
-			continue
-		}
+	if a.friendCode == 0 {
+		a.friendCode = pkt.User.FriendCode
+		return nil
+	}
 
-		data := pkt.data
-		sendersAid := data[1]
+	if pkt.User.FriendCode != a.friendCode {
+		return fmt.Errorf("friend code changed from %d to %d", a.friendCode, pkt.User.FriendCode)
+	}
+	return nil
+}
 
-		if sendersAid != sender.aid {
-			continue
-		}
-
-		if !sender.isRacer && containsSelect(data) {
-			logging.Log("Aid %d sent select!", sender.aid)
-			sender.isRacer = true
-		}
-
-		_, err := parseRacePacket(data)
-		if err != nil {
-			logging.Log("Aid %d sent invalid Race packet! Reason: %v.", sender.aid, err)
-			continue
-		}
-
-		aidBitmap := binary.BigEndian.Uint16(data[2:4])
-		receivingAids := util.GetSendToAids(aidBitmap)
-
-		for _, aid := range *receivingAids {
-			a := getAid(aid)
-			if a == nil {
-				// This can happen when someone left, but wfc-server hasn't yet informed other aids yet
-				continue
+// trackPlayerState records per-player state the server uses for item decisions.
+// Caller must hold mu.
+func trackPlayerState(a *Aid, pkt *RacePacket, now time.Time) {
+	if pkt.RaceInfo != nil {
+		started := pkt.IsCountdownStarted()
+		if started && !a.raceStarted {
+			if a.bot == nil && (rec == nil || now.Sub(rec.start) > 20*time.Second) {
+				startRecording(pkt.RaceInfo.Course(), now)
 			}
-
-			if aid == sendersAid {
-				logging.Log("Attempted to send from %d to %d", sendersAid, aid)
-				continue
+			resetItemState(a)
+			resetMovement(a)
+			resetHitChecks()
+			resetProgress(a)
+			for _, b := range aids {
+				if b.bot != nil {
+					resetProgress(b)
+				}
 			}
+			a.raceStartedAt = time.Now()
+		}
+		a.raceStarted = started
+		a.mode = pkt.RaceInfo.GameMode()
+		a.course = pkt.RaceInfo.Course()
+		for i, p := range a.players {
+			p.vehicle, p.character = pkt.RaceInfo.Combo(i)
+		}
+	}
 
-			_, err := room.conn.WriteTo(pkt.data, a.addr)
-			if err != nil {
-				logging.Log("Error writitng to aid %d", a.aid)
-				continue
+	for i, rd := range pkt.RaceData {
+		if i < len(a.players) {
+			a.players[i].rank = rd.Rank
+			if rd.HasPosition() {
+				recordPosition(a.players[i], rd.WorldPos(), now)
+				checkLeafPiles(a, a.players[i], rd.WorldPos(), now)
+			}
+			if a.raceStarted {
+				var frame uint32
+				if pkt.RaceInfo != nil {
+					frame = pkt.RaceInfo.Frame()
+				}
+				trackProgress(a, i, rd, a.course, frame, now)
+			}
+		}
+	}
+
+	if pkt.RaceMode != nil && pkt.RaceMode.Battle != nil {
+		for i, score := range pkt.RaceMode.Battle.Scores {
+			if i < len(a.players) {
+				a.players[i].battleScore = score
 			}
 		}
 	}
@@ -173,70 +314,74 @@ func broadcastLoop() {
 func pingLoop() {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
-	for range ticker.C {
+	lastStats := time.Now()
+	for now := range ticker.C {
+		mu.Lock()
+		if now.Sub(lastStats) >= statsInterval {
+			logStats(now.Sub(lastStats))
+			lastStats = now
+		}
 		for _, a := range aids {
-			if a == nil {
+			if a == nil || a.kicked || a.bot != nil {
 				continue
 			}
 			sendPing(a)
 		}
+		mu.Unlock()
 	}
 }
 
+// Caller must hold mu.
 func getAid(aid byte) *Aid {
-	for addr, a := range aids {
-		if addr == "" || a == nil {
-			continue
-		}
-
-		if a.aid == aid {
+	for _, a := range aids {
+		if a != nil && a.aid == aid {
 			return a
 		}
 	}
 	return nil
 }
 
-func AddAidToRoom(aidAddr string, aid byte, hasGuest bool) error {
+func AddAidToRoom(aidAddr string, aid byte, isHost bool, hasGuest bool) error {
+	mu.Lock()
+	defer mu.Unlock()
+
 	if _, exists := aids[aidAddr]; exists {
 		return fmt.Errorf("Aid %s already exists in room", aidAddr)
 	}
 
-	room.aidBitmap = util.SetAid(room.aidBitmap, aid)
-	a, err := NewAid(aidAddr, room, aid, hasGuest)
-	if err != nil {
-		return fmt.Errorf("Failed to create aid %s due to", aidAddr)
+	if getAid(aid) != nil {
+		return fmt.Errorf("Aid number %d is already in use", aid)
 	}
 
+	a, err := NewAid(aidAddr, aid, isHost, hasGuest)
+	if err != nil {
+		return fmt.Errorf("Failed to create aid %s: %w", aidAddr, err)
+	}
+
+	room.aidBitmap = util.SetAid(room.aidBitmap, aid)
 	aids[aidAddr] = a
 
-	logging.Log("Successfully added aid %s (aid: %d). Aid count is %d", aidAddr, a.aid, GetCurrentAidCount())
+	logging.Log("Successfully added aid %s (aid: %d, host: %v, guest: %v). Aid count is %d", aidAddr, a.aid, isHost, hasGuest, len(aids))
 	return nil
 }
 
 func RemoveAidFromRoom(aidAddr string) error {
-	a, _ := aids[aidAddr]
+	mu.Lock()
+	defer mu.Unlock()
 
+	a := aids[aidAddr]
 	if a == nil {
 		return fmt.Errorf("Aid %s not in room, can't remove", aidAddr)
 	}
 
 	room.aidBitmap = util.ClearAid(room.aidBitmap, a.aid)
-
-	logging.Log("Successfully removed aid %s (aid: %d). Aid count is %d", aidAddr, a.aid, GetCurrentAidCount())
-
 	delete(aids, aidAddr)
-	return nil
-}
+	forgetLearnedAddrs(a)
 
-// gets the aid if the aid is the room's host
-func GetHost(aidAddr string) *Aid {
-	a, _ := aids[aidAddr]
+	logging.Log("Successfully removed aid %s (aid: %d). Aid count is %d", aidAddr, a.aid, len(aids))
 
-	if a == nil {
-		logging.Log("Aid %s not in room, can't remove")
-		return nil
-	}
-
+	// The leaving aid may have been the last one the countdown was waiting on.
+	tryUpdateRoomCountdownState()
 	return nil
 }
 
@@ -245,26 +390,22 @@ func GetRoomAddr() string {
 }
 
 func GetCurrentAidCount() int {
+	mu.Lock()
+	defer mu.Unlock()
 	return len(aids)
 }
 
 func CloseRoom() {
-	room.conn.Close()
+	if room.conn != nil {
+		room.conn.Close()
+	}
 }
 
 func RoomInitialized() bool {
 	return room != nil
 }
 
+// Caller must hold mu.
 func isAidInRoom(aid byte) bool {
-	for _, a := range aids {
-		if a == nil {
-			continue
-		}
-
-		if a.aid == aid {
-			return true
-		}
-	}
-	return false
+	return getAid(aid) != nil
 }
