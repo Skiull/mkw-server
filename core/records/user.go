@@ -11,7 +11,7 @@ const UserLen = 0xc0
 const miiLen = 0x4c
 const userMaxMiiCount = 2
 
-// The game caps VR and BR at 9999.
+// The game caps BR at 9999 (VR too, but mogi rooms send LR in its place).
 const maxRankPoints = 9999
 
 // Region values in the User record.
@@ -121,9 +121,7 @@ func ParseUser(data []byte, ctx *Context) (*User, error) {
 		return nil, fmt.Errorf("invalid region (%d)", u.Region)
 	}
 
-	if u.VR > maxRankPoints {
-		return nil, fmt.Errorf("VR (%d) > %d", u.VR, maxRankPoints)
-	}
+	// VR isn't capped: mogi rooms send LR (up to 65535) in its place.
 
 	if u.BR > maxRankPoints {
 		return nil, fmt.Errorf("BR (%d) > %d", u.BR, maxRankPoints)
