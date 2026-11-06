@@ -210,5 +210,5 @@ func learningChallenges(a *Aid) bool {
 	if room.config.LearnChallenges {
 		return true
 	}
-	return room.config.ChallengeFile != "" && isTrusted(a) && len(challengeAnswers[a.gameHash]) < challengeSeeds
+	return room.config.ChallengeFile != "" && learnsFrom(a) && len(challengeAnswers[a.gameHash]) < challengeSeeds
 }

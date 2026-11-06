@@ -30,7 +30,7 @@ func isGameHashPacket(data []byte) bool {
 // Caller must hold mu.
 func handleGameHash(a *Aid, data []byte, now time.Time) {
 	hash := binary.BigEndian.Uint64(data[2:])
-	if isTrusted(a) {
+	if learnsFrom(a) {
 		learnGameHash(a, hash)
 	}
 	known := room.config.GameHashes == nil || room.config.GameHashes[hash]

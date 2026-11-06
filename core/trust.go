@@ -21,12 +21,19 @@ import (
 //   - their game hash challenge answers are learned while a build has fewer than
 //     challengeSeeds of them;
 //   - StaticR.rel .data blocks they change join the normal list (MutableDataBlocks).
+//
+// Only the newest client build is accepted. Each build reports its build number (build.py:
+// the commit time) in its 'G' 'L' packet. When a trusted player shows up with a higher one,
+// every game hash, login hash and challenge answer of older builds is forgotten, so players
+// on an older build are refused until they update. Learning needs the build number, so
+// trusted players on builds from before build numbers don't teach anything.
 // Learned values go to -learn-file (JSON), which wfc-server also reads for login hashes.
 //
 // Trust comes from the profile ID wfc-server sends when the player joins (its login was
 // verified there), not from anything the client claims.
 
 type learnedFile struct {
+	Build             uint32   `json:"build"` // Build number the hashes below belong to.
 	GameHashes        []string `json:"gameHashes"`
 	LoginHashes       []string `json:"loginHashes"`
 	MutableDataBlocks []int    `json:"mutableDataBlocks"`
@@ -35,6 +42,7 @@ type learnedFile struct {
 // Guarded by mu.
 var (
 	learnedLoginHashes = map[uint64]bool{}
+	currentBuild       uint32
 	learnSaveMu        sync.Mutex
 )
 
@@ -74,6 +82,11 @@ func LoadLearned(path string, config *Config) error {
 	var f learnedFile
 	if err := json.Unmarshal(data, &f); err != nil {
 		return err
+	}
+	currentBuild = f.Build
+	if config.GameHashes == nil {
+		// An empty allowlist still means "check": only learned builds get in.
+		config.GameHashes = map[uint64]bool{}
 	}
 	for _, h := range f.GameHashes {
 		v, err := strconv.ParseUint(h, 16, 64)
@@ -115,6 +128,39 @@ func isTrusted(a *Aid) bool {
 	return a.profileID != 0 && room.config.TrustedPlayers[a.profileID]
 }
 
+// learnsFrom reports whether the server learns what this aid reports: a trusted player on
+// the current build. Caller must hold mu.
+func learnsFrom(a *Aid) bool {
+	return isTrusted(a) && a.buildID != 0 && a.buildID == currentBuild
+}
+
+// setBuild records an aid's build number and, for a trusted player on a newer build than
+// any learned, makes it the only accepted build. Caller must hold mu.
+func setBuild(a *Aid, build uint32) {
+	if build == 0 || build == a.buildID {
+		return
+	}
+	a.buildID = build
+	if !isTrusted(a) || build <= currentBuild {
+		if isTrusted(a) && build < currentBuild {
+			logging.Log("Trusted aid %d is on old build %d (current %d): not learning from it", a.aid, build, currentBuild)
+		}
+		return
+	}
+	logging.Log("Trusted aid %d is on new build %d (was %d): older builds are no longer accepted", a.aid, build, currentBuild)
+	currentBuild = build
+	room.config.GameHashes = map[uint64]bool{}
+	learnedLoginHashes = map[uint64]bool{}
+	challengeAnswers = map[uint64]map[uint32]uint64{}
+	for _, other := range aids {
+		other.challenge = challengeState{}
+	}
+	if room.config.ChallengeFile != "" {
+		saveChallenges()
+	}
+	saveLearned()
+}
+
 // learnGameHash adds a trusted player's in-room game hash. Caller must hold mu.
 func learnGameHash(a *Aid, hash uint64) {
 	if room.config.GameHashes == nil {
@@ -128,14 +174,28 @@ func learnGameHash(a *Aid, hash uint64) {
 	saveLearned()
 }
 
+// 'G' 'L' + login hash (u64), then the build number (u32) on builds that report one.
 func isLoginHashPacket(data []byte) bool {
-	return len(data) == 10 && data[0] == 'G' && data[1] == 'L'
+	return (len(data) == 10 || len(data) == 14) && data[0] == 'G' && data[1] == 'L'
 }
 
-// handleLoginHash learns a trusted player's login game hash. Caller must hold mu.
+// handleLoginHash notes the aid's build and learns a trusted player's login game hash.
+// Caller must hold mu.
 func handleLoginHash(a *Aid, data []byte) {
-	hash := binary.BigEndian.Uint64(data[2:])
-	if !isTrusted(a) || learnedLoginHashes[hash] {
+	hash := binary.BigEndian.Uint64(data[2:10])
+	if len(data) == 14 {
+		setBuild(a, binary.BigEndian.Uint32(data[10:]))
+	}
+	if !learnsFrom(a) {
+		return
+	}
+	// The in-room hash arrives just before this packet, so learn it now rather than
+	// counting it as unknown.
+	if a.gameHash != 0 {
+		learnGameHash(a, a.gameHash)
+		a.unknownHashes = 0
+	}
+	if learnedLoginHashes[hash] {
 		return
 	}
 	learnedLoginHashes[hash] = true
@@ -167,7 +227,7 @@ func saveLearned() {
 	if path == "" {
 		return
 	}
-	var f learnedFile
+	f := learnedFile{Build: currentBuild}
 	for h := range room.config.GameHashes {
 		f.GameHashes = append(f.GameHashes, fmt.Sprintf("%016x", h))
 	}
@@ -188,8 +248,14 @@ func saveLearned() {
 		if old, err := os.ReadFile(path); err == nil {
 			var prev learnedFile
 			if json.Unmarshal(old, &prev) == nil {
-				f.GameHashes = union(f.GameHashes, prev.GameHashes)
-				f.LoginHashes = union(f.LoginHashes, prev.LoginHashes)
+				if prev.Build > f.Build {
+					return // Another room already moved to a newer build.
+				}
+				if prev.Build == f.Build {
+					f.GameHashes = union(f.GameHashes, prev.GameHashes)
+					f.LoginHashes = union(f.LoginHashes, prev.LoginHashes)
+				}
+				// Normal .data blocks don't depend on the build: always keep them.
 				f.MutableDataBlocks = union(f.MutableDataBlocks, prev.MutableDataBlocks)
 				data, _ = json.MarshalIndent(f, "", " ")
 			}

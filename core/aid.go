@@ -51,6 +51,8 @@ type Aid struct {
 	challenge       challengeState
 	// Logged-in profile ID from wfc-server (trust.go). 0 if unknown.
 	profileID uint32
+	// Client build number from its 'G' 'L' packet (trust.go). 0 until reported.
+	buildID uint32
 
 	// Set for test bots, which the server plays itself.
 	bot *botState
