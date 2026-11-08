@@ -44,6 +44,9 @@ type Config struct {
 	// Trusted players by profile ID, and where learned values go (trust.go).
 	TrustedPlayers map[uint32]bool
 	LearnFile      string
+	// Folder with our Kinoko build (kinoko.exe, Race/, lines/) for AI bots (ai_bots.go).
+	// Empty: bots mirror a real player instead.
+	AIBotDir string
 	// Folder for race recordings (recorder.go). Empty: off.
 	RecordDir string
 	// Also record raw race-state bytes when they change (diagnostics).

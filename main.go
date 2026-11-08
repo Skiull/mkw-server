@@ -56,6 +56,7 @@ func main() {
 	recordPackets := flag.Bool("record-packets", false, "Also save each player's race records as sent (<race>.pkt), for in-game replays (requires --record-dir)")
 	replaySpectate := flag.Bool("replay-spectate", false, "With --replay: the bots run the recorded race from when the room opens, for a watcher who joins it in progress")
 	replayFile := flag.String("replay", "", "Packet recording (.pkt) for the room's bots to play back instead of mirroring the live player")
+	aiBots := flag.String("ai-bots", "", "Folder with our Kinoko build (kinoko.exe, Race/, lines/): test bots drive themselves with the AI instead of mirroring a player")
 	recordDir := flag.String("record-dir", "", "Folder to save race recordings in (positions, items, flags per race)")
 	kickNoHit := flag.Bool("kick-no-hit", false, "Kick (as cheating) players who don't take a hit the server is sure of (rams, Lightning, Blue Shells, tracked Bananas and Fake Item Boxes)")
 	kickDataCheats := flag.Bool("kick-data-cheats", false, "Kick (as cheating) clients whose StaticR.rel .data changed outside --mutable-data-blocks")
@@ -143,6 +144,7 @@ func main() {
 	config.KickDataCheats = *kickDataCheats
 	config.KickNoHit = *kickNoHit
 	config.RecordDir = *recordDir
+	config.AIBotDir = *aiBots
 	config.RecordRaw = *recordRaw
 	config.RecordPackets = *recordPackets
 	if *replayFile != "" {

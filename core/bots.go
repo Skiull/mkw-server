@@ -46,6 +46,8 @@ type botState struct {
 	vehicleClass int
 	// How far behind the reference the bot replays RaceData.
 	delay time.Duration
+	// AI driving (ai_bots.go), when --ai-bots is set.
+	ai *aiBotState
 }
 
 // timedRecord is a RaceData record from the reference and when it arrived.
@@ -294,6 +296,13 @@ func buildBotPacket(bot, ref, dest *Aid, now time.Time) []byte {
 	if rp != nil {
 		character = rp.character
 	}
+	if room.config.AIBotDir != "" && rp == nil {
+		if bot.bot.ai == nil {
+			bot.bot.ai = &aiBotState{}
+			bot.bot.ai.character, bot.bot.ai.vehicle = newAIBotCombo(bot.aid)
+		}
+		character, vehicle = common.Character(bot.bot.ai.character), common.Vehicle(bot.bot.ai.vehicle)
+	}
 
 	if ri := src[common.RaceInfo]; ri != nil {
 		d := append([]byte{}, ri...)
@@ -318,6 +327,15 @@ func buildBotPacket(bot, ref, dest *Aid, now time.Time) []byte {
 
 	if rd := src[common.RaceData]; rd != nil {
 		recs[common.RaceData] = botRaceData(ref.mirror, bot.bot.delay, now)
+		if rp == nil {
+			if d := aiBotRaceData(bot, ref, now); d != nil {
+				// Same record length as the reference's (two players' worth with a guest).
+				if len(rd) > len(d) {
+					d = append(d, make([]byte, len(rd)-len(d))...)
+				}
+				recs[common.RaceData] = d
+			}
+		}
 		if rp != nil {
 			if d := rp.replayRaceData(replayMs(ref, now)); d != nil {
 				recs[common.RaceData] = d
@@ -365,6 +383,13 @@ func botRaceMode(rm []byte, mode common.GameMode, bot *Aid, ref *Aid, rp *replay
 		records.PutBits(d, 41, 4, uint32(aid)) // Player 1 slot.
 		records.PutBits(d, 45, 22, 0)          // Not finished.
 		ft, bit, ok := botFinish(bot, m, now)
+		if room.config.AIBotDir != "" && rp == nil {
+			ft, ok = aiBotFinish(bot)
+			bit = -1
+			if id := playerIdOf(m.records[common.RaceInfo], bot.aid); id >= 0 {
+				bit = id + m.finishBitShift
+			}
+		}
 		if rp != nil {
 			// Replayed racers finish at their recorded time.
 			ft, ok = rp.replayFinished(replayMs(ref, now))
@@ -519,4 +544,18 @@ func addMilliseconds(t records.FinishTime, ms int) records.FinishTime {
 
 func packFinishTime(t records.FinishTime) uint32 {
 	return uint32(t.Minutes)<<16 | uint32(t.Seconds)<<10 | uint32(t.Milliseconds)
+}
+
+// raceInfoPlayerCount counts the racers in a RaceInfo's player id -> aid map (0xff: empty).
+func raceInfoPlayerCount(raceInfo []byte) int {
+	if len(raceInfo) < 0x24 {
+		return 0
+	}
+	n := 0
+	for _, a := range raceInfo[0x18:0x24] {
+		if a != 0xff {
+			n++
+		}
+	}
+	return n
 }
