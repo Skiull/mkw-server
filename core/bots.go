@@ -383,7 +383,7 @@ func botRaceMode(rm []byte, mode common.GameMode, bot *Aid, ref *Aid, rp *replay
 		records.PutBits(d, 41, 4, uint32(aid)) // Player 1 slot.
 		records.PutBits(d, 45, 22, 0)          // Not finished.
 		ft, bit, ok := botFinish(bot, m, now)
-		if room.config.AIBotDir != "" && rp == nil {
+		if rp == nil && bot.bot.ai != nil && bot.bot.ai.driver != nil {
 			ft, ok = aiBotFinish(bot)
 			bit = -1
 			if id := playerIdOf(m.records[common.RaceInfo], bot.aid); id >= 0 {
