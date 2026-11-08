@@ -101,10 +101,24 @@ type aiDriver struct {
 	done   chan struct{}
 }
 
+// aiGhostCombo reads the character and vehicle of the ghost a line was made from (the .rkg
+// next to it). Bots drive with this combo, since a line only works for the vehicle that drove
+// it (drift type, speed); they still show the combo picked in the menus.
+func aiGhostCombo(line string) (character, vehicle byte, ok bool) {
+	data, err := os.ReadFile(strings.TrimSuffix(line, ".line") + ".rkg")
+	if err != nil || len(data) < 0x0a || string(data[:4]) != "RKGD" {
+		return 0, 0, false
+	}
+	return (data[8]&3)<<4 | data[9]>>4, data[8] >> 2, true
+}
+
 func startAIDriver(dir string, course common.Course, character, vehicle byte, slot, players int) (*aiDriver, error) {
 	line := aiLineFor(dir, course)
 	if line == "" {
 		return nil, fmt.Errorf("no racing line for course %d", course)
+	}
+	if c, v, ok := aiGhostCombo(line); ok {
+		character, vehicle = c, v
 	}
 	exe := filepath.Join(dir, "kinoko.exe")
 	args := []string{"serve", "-c", strconv.Itoa(int(course)), "-k", strconv.Itoa(int(character)),
