@@ -56,7 +56,16 @@ const (
 
 // aiLineFor picks the course's racing line: no-glitch first, then no-shortcut, then the
 // plain run (tracks without glitches only have that one).
-func aiLineFor(dir string, course common.Course) string {
+func aiLineFor(dir string, course common.Course, vehicle byte) string {
+	// Shroomless Flame Runner / Mach Bike lines from Chadsoft ghosts (lines/sl-<course>-v<vehicle>):
+	// online bots have no mushrooms, so lines that use them make bots aim for cuts they can't
+	// make. The bot's own vehicle first.
+	for _, v := range []byte{vehicle, aiFlameRunner, aiMachBike} {
+		p := filepath.Join(dir, "lines", fmt.Sprintf("sl-%02d-v%d.line", course, v))
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
 	prefix, ok := aiLinePrefixes[course]
 	if !ok {
 		return ""
@@ -113,7 +122,7 @@ func aiGhostCombo(line string) (character, vehicle byte, ok bool) {
 }
 
 func startAIDriver(dir string, course common.Course, character, vehicle byte, slot, players int) (*aiDriver, error) {
-	line := aiLineFor(dir, course)
+	line := aiLineFor(dir, course, vehicle)
 	if line == "" {
 		return nil, fmt.Errorf("no racing line for course %d", course)
 	}
