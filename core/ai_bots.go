@@ -60,8 +60,15 @@ func aiLineFor(dir string, course common.Course, vehicle byte) string {
 	// Shroomless Flame Runner / Mach Bike lines from Chadsoft ghosts (lines/sl-<course>-v<vehicle>):
 	// online bots have no mushrooms, so lines that use them make bots aim for cuts they can't
 	// make. The bot's own vehicle first.
+	// Then the track's fastest shroomless run on any vehicle (sl-<course>-any; the bot drives
+	// with that ghost's combo).
+	names := []string{}
 	for _, v := range []byte{vehicle, aiFlameRunner, aiMachBike} {
-		p := filepath.Join(dir, "lines", fmt.Sprintf("sl-%02d-v%d.line", course, v))
+		names = append(names, fmt.Sprintf("sl-%02d-v%d.line", course, v))
+	}
+	names = append(names, fmt.Sprintf("sl-%02d-any.line", course))
+	for _, n := range names {
+		p := filepath.Join(dir, "lines", n)
 		if _, err := os.Stat(p); err == nil {
 			return p
 		}
