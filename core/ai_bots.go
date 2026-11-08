@@ -259,6 +259,8 @@ type aiBotState struct {
 	character byte
 	vehicle   byte
 	failed    bool // Couldn't start for this race (no line etc.): don't retry.
+	// The reference's latest countdown frame, to notice a new race starting.
+	lastElapsed int
 }
 
 func newAIBotCombo(aid byte) (character, vehicle byte) {
@@ -282,7 +284,27 @@ func aiBotRaceData(bot, ref *Aid, now time.Time) []byte {
 		return nil
 	}
 	info, err := records.ParseRaceInfo(ri)
-	if err != nil || info.CountdownElapsedTime() == 0 {
+	if err != nil {
+		// A record we can't read: keep the bot where its AI has it rather than falling back to
+		// the mirrored (seconds-old) position, which looks like a jump backwards.
+		if s := bot.bot.ai; s != nil && s.driver != nil {
+			return s.driver.latest(0)
+		}
+		return nil
+	}
+	// A new countdown (the reference's frame count went back) or a different course: this
+	// driver's race is over.
+	if s := bot.bot.ai; s != nil && s.driver != nil {
+		if info.Course() != s.course || int(info.CountdownElapsedTime())+120 < s.lastElapsed {
+			s.driver.stop()
+			s.driver = nil
+			s.failed = false
+		}
+	}
+	if s := bot.bot.ai; s != nil && info.CountdownElapsedTime() != 0 {
+		s.lastElapsed = int(info.CountdownElapsedTime())
+	}
+	if info.CountdownElapsedTime() == 0 {
 		// Before the countdown: stop any driver from the last race.
 		if s := bot.bot.ai; s != nil && s.driver != nil {
 			s.driver.stop()
