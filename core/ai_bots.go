@@ -136,10 +136,21 @@ func startAIDriver(dir string, course common.Course, character, vehicle byte, sl
 	if c, v, ok := aiGhostCombo(line); ok {
 		character, vehicle = c, v
 	}
+	// This grid slot's best saved run (slot_lines.go): replayed exactly, look-ahead only when
+	// knocked off it. Every race is recorded and kept if it beats the saved one.
+	drive := line
+	exact := false
+	if best, ok := aiSlotBest(dir, course, slot, players, line); ok {
+		drive, exact = best, true
+	}
+	candidate := aiSlotCandidate(dir, course, slot, players)
 	exe := filepath.Join(dir, "kinoko.exe")
 	args := []string{"serve", "-c", strconv.Itoa(int(course)), "-k", strconv.Itoa(int(character)),
-		"-v", strconv.Itoa(int(vehicle)), "-l", line, "-p", strconv.Itoa(slot), "-n", strconv.Itoa(players),
-		"-o", strconv.Itoa(aiObjectDelayFrames)}
+		"-v", strconv.Itoa(int(vehicle)), "-l", drive, "-p", strconv.Itoa(slot), "-n", strconv.Itoa(players),
+		"-o", strconv.Itoa(aiObjectDelayFrames), "-w", candidate}
+	if exact {
+		args = append(args, "-e")
+	}
 	cmd := exec.Command(exe, args...)
 	cmd.Dir = dir
 	cmd.Stderr = os.Stderr
@@ -178,7 +189,22 @@ func startAIDriver(dir string, course common.Course, character, vehicle byte, sl
 
 	go func() {
 		defer close(d.done)
-		defer cmd.Process.Kill()
+		defer func() {
+			// Let it close the recording, then keep it if this was the slot's fastest race.
+			fmt.Fprintln(stdin, "quit")
+			stdin.Close()
+			waited := make(chan struct{})
+			go func() { cmd.Wait(); close(waited) }()
+			select {
+			case <-waited:
+			case <-time.After(5 * time.Second):
+				cmd.Process.Kill()
+			}
+			d.mu.Lock()
+			finished, frames := d.finished, d.finishAt
+			d.mu.Unlock()
+			aiSlotFinish(dir, course, slot, players, line, candidate, finished, frames)
+		}()
 		for target := range d.target {
 			d.mu.Lock()
 			n := target - d.frame
@@ -219,7 +245,6 @@ func startAIDriver(dir string, course common.Course, character, vehicle byte, sl
 				d.mu.Unlock()
 			}
 		}
-		fmt.Fprintln(stdin, "quit")
 	}()
 	return d, nil
 }
