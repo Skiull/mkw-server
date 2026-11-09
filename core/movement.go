@@ -217,8 +217,20 @@ func checkMovement(p *Player, frame uint32, rd *records.RaceData, walls *items.W
 		if limit, ok := squishLimit(m, first.frame, frame); ok && !mega && !(frame < m.bulletUntil && !m.bulletEnded) && speed > limit {
 			m.squishNote = fmt.Sprintf("averaged %.0f u/f over %d frames while squished (limit %.0f)", speed, frame-first.frame, limit)
 		}
-		if limit, ok := offroadLimit(m, first.frame); ok && speed > limit {
-			return fmt.Sprintf("averaged %.0f u/f over %d frames on %s (limit %.0f)", speed, frame-first.frame, floorName(m.offroadType), limit)
+		// Offroad: a shorter average (the last offroadWindowFrames), so it's caught sooner.
+		var recent moveSample
+		for _, s := range m.samples {
+			if frame-s.frame <= offroadWindowFrames {
+				recent = s
+				break
+			}
+		}
+		if n := frame - recent.frame; n >= offroadWindowFrames/2 {
+			if limit, ok := offroadLimit(m, recent.frame); ok {
+				if ospeed := items.Distance(recent.pos, pos) / float32(n); ospeed > limit {
+					return fmt.Sprintf("averaged %.0f u/f over %d frames on %s (limit %.0f)", ospeed, n, floorName(m.offroadType), limit)
+				}
+			}
 		}
 		if limit := speedLimit(frame, m, mega); speed > limit {
 			problem = fmt.Sprintf("averaged %.0f u/f over %d frames (limit %.0f)", speed, frame-first.frame, limit)

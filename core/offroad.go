@@ -14,7 +14,9 @@ import (
 
 const (
 	// Time for a vehicle to slow to offroad speed after entering offroad or a boost ending.
-	offroadSettleFrames = 60
+	offroadSettleFrames = 40
+	// Frames the offroad speed is averaged over (shorter than the general check's window).
+	offroadWindowFrames = 20
 	// How long a mini-turbo, trick or Mushroom boost may lift the speed after it starts
 	// (or, for a Mushroom, after the boost flag clears).
 	boostFrames = 90
