@@ -67,7 +67,20 @@ func offroadLimit(m *moveState, windowStart uint32) (float32, bool) {
 	if m.offroadSince == 0 || windowStart < m.offroadSince+offroadSettleFrames {
 		return 0, false
 	}
-	return 120*offroadFactor(m, m.offroadType)*offroadSlack + offroadExtraSpeed, true
+	// From the combo's own top speed when its stats are known (as the combo speed check):
+	// based on the 120 cap, weak offroad (sand, shallow water) allowed more speed than any
+	// vehicle has, so a no-offroad code went unnoticed there.
+	top := float32(120)
+	if m.stats != nil {
+		if base := m.stats.BaseSpeed(m.vehicle, m.character); base > 0 {
+			mul := float32(1)
+			if items.IsBike(m.vehicle) {
+				mul += wheelieBonus
+			}
+			top = base * engineSpeedFactor * mul
+		}
+	}
+	return top*offroadFactor(m, m.offroadType)*offroadSlack + offroadExtraSpeed, true
 }
 
 func floorName(ty uint8) string {
