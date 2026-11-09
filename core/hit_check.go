@@ -31,6 +31,11 @@ const (
 	hitMinSpeed     = 45
 	ramPositionAge  = 250 * time.Millisecond
 	ramRepeatPeriod = 3 * time.Second
+	// After the game reports a hit, speed must drop within this long.
+	hitSlowWait  = 1500 * time.Millisecond
+	hitKeptSpeed = 0.8
+	// KartActions that don't always slow the kart: 8 Cataquack launch.
+	hitActionsNoSlow = 1 << 8
 )
 
 type hitExpectation struct {
@@ -46,6 +51,9 @@ type hitExpectation struct {
 	logOnly bool
 	// The tracked ground item driven through, if that's the reason.
 	item *groundItem
+	// The player's own game said it got hit: only a slowdown counts (a "keep speed when
+	// hit" code still spins but doesn't slow down).
+	needSlow bool
 }
 
 // Guarded by mu.
@@ -66,6 +74,12 @@ func observeHits(a *Aid, p *Player, rd *records.RaceData, now time.Time) {
 			lastBlueHitAt = now
 		}
 	}
+	actions := rd.KartActions() &^ hitActionsNoSlow
+	if p.hitFlagsSeen && actions != p.kartActions && !p.invincible(now) && p.move.lastSpeed >= hitMinSpeed {
+		e := expectHit(a, p, fmt.Sprintf("hit (KartAction bits %#x) without losing speed", actions^p.kartActions), now, hitSlowWait, false)
+		e.needSlow = true
+	}
+	p.kartActions = actions
 	p.hitFlags, p.blueHitFlags, p.hitFlagsSeen = flags, blue, true
 
 	if rd.HasPosition() {
@@ -166,15 +180,20 @@ func resolveHits(now time.Time) (missed []*hitExpectation) {
 		flagged := p.hitAt.After(e.at) || (e.anyone && lastBlueHitAt.After(e.at))
 		slowed := e.minSpeed <= hitStopSpeed || (e.speedAt > hitStopSpeed && e.minSpeed <= e.speedAt*hitSlowdown)
 		hit := flagged || slowed
+		if e.needSlow {
+			// A real hit drops speed to a fraction (recorded: 140->12, 70->14); a "keep speed"
+			// code holds 85-95%. Lenient so a soft hit isn't kicked.
+			hit = e.minSpeed <= hitStopSpeed || e.minSpeed <= e.speedAt*hitKeptSpeed
+		}
 		switch {
 		case hit, e.aid.kicked:
 		case e.speedAt < hitMinSpeed:
 			// Already slow: a hit can't be told apart from driving slowly. No verdict. (The
 			// Fake Item Box hit flag doesn't flip on real hits, so it can't be relied on.)
-		case p.invincible(now) && !e.anyone:
+		case p.invincible(now) && !e.anyone && !e.needSlow:
 			// Became invincible in time (a Star or Bullet Bill dodges it).
 		case now.After(e.deadline):
-			logging.Log("Aid %d player %d possible no-hit code: %s, but no hit flag and speed only fell %.0f -> %.0f u/f",
+			logging.Log("Aid %d player %d possible no-hit code: %s; speed only fell %.0f -> %.0f u/f",
 				e.aid.aid, playerIndex(e.aid, p), e.reason, e.speedAt, e.minSpeed)
 			missed = append(missed, e)
 			recordFlag(e.aid, "possible no-hit: "+e.reason, now)

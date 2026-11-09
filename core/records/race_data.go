@@ -156,5 +156,19 @@ func (r *RaceData) HitFlags() byte { return r.data[0x2c] & 0xf2 }
 // BlueShellHitFlags holds the Blue Shell / Bob-omb hit bits (full and half).
 func (r *RaceData) BlueShellHitFlags() byte { return r.data[0x2c] & 0x30 }
 
+// KartActions packs the "KartAction j started" flip bits (j = 0..17; RACEDATA word A, bit j
+// at stream bit 355-j) into bit j of the result. Each flips when the player gets hit
+// (spun out, tumbled, launched, squished...).
+func (r *RaceData) KartActions() uint32 {
+	var v uint32
+	for j := 0; j < 18; j++ {
+		bit := 355 - j
+		if r.data[bit/8]&(0x80>>(bit%8)) != 0 {
+			v |= 1 << j
+		}
+	}
+	return v
+}
+
 // Raw returns the record's bytes (for diagnostics).
 func (r *RaceData) Raw() []byte { return r.data[:] }

@@ -52,6 +52,7 @@ type Player struct {
 	// No-hit checks (hit_check.go).
 	hitFlags, blueHitFlags byte
 	hitFlagsSeen           bool
+	kartActions            uint32 // KartAction flip bits seen last (RACEDATA word A).
 	hitAt, rammedAt        time.Time
 	lastPos                [3]float32
 	lastPosAt              time.Time
