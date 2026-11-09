@@ -88,7 +88,7 @@ func decideItem(engine *items.Engine, a *Aid, p *Player, now time.Time) (common.
 		p.grant = nil
 	}
 
-	req := items.Request{Mode: a.mode, InPlay: itemsInPlay(), Invincible: p.invincible(now)}
+	req := items.Request{Mode: a.mode, InPlay: itemsInPlay(), Invincible: p.invincible(now), InMega: p.inMega(now)}
 	switch a.mode {
 	case common.ModeVS:
 		if p.rank == 0 {
@@ -391,5 +391,11 @@ const (
 // rules out pulling a Thunder Cloud.
 func (p *Player) invincible(now time.Time) bool {
 	within := func(at time.Time, d time.Duration) bool { return !at.IsZero() && now.Sub(at) <= d }
-	return within(p.starAt, starDuration) || within(p.megaAt, megaItemWindow) || (within(p.bulletAt, bulletDuration) && !p.bulletEnded)
+	return within(p.starAt, starDuration) || p.inMega(now) || (within(p.bulletAt, bulletDuration) && !p.bulletEnded)
+}
+
+// inMega reports whether the player may still be in a Mega Mushroom (the movement check's
+// length, so a Thunder Cloud or a second Mega can't be pulled near its end).
+func (p *Player) inMega(now time.Time) bool {
+	return !p.megaAt.IsZero() && now.Sub(p.megaAt) <= megaDuration
 }

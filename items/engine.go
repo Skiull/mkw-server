@@ -103,6 +103,8 @@ type Request struct {
 	InPlay map[common.ItemObject]int
 	// The player is in a Star, Mega Mushroom or Bullet Bill: no Thunder Cloud then.
 	Invincible bool
+	// The player is in a Mega Mushroom: no second Mega then.
+	InMega bool
 }
 
 func tableFor(mode common.GameMode) (int, error) {
@@ -217,6 +219,9 @@ func (e *Engine) Decide(req Request, now time.Time) (common.ItemType, error) {
 // Available reports whether item can be pulled right now.
 func (e *Engine) Available(item common.ItemType, req Request, now time.Time) bool {
 	if item == common.ThunderCloud && req.Invincible {
+		return false
+	}
+	if item == common.MegaMushroom && req.InMega {
 		return false
 	}
 	if first, ok := e.limits.FirstAvailable[item]; ok && req.Mode == common.ModeVS && req.RaceTime < first {
