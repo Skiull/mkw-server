@@ -324,6 +324,9 @@ func checkFinish(a *Aid, pkt *RacePacket, now time.Time) {
 		claimed := time.Duration(ft.Minutes)*time.Minute + time.Duration(ft.Seconds)*time.Second +
 			time.Duration(ft.Milliseconds)*time.Millisecond
 		var problem string
+		if finishOK(st) {
+			raceHadFinisher = true
+		}
 		switch {
 		case !finishOK(st) && someoneElseFinished(p):
 			// Once someone has crossed the line the game ends the race for everyone still
@@ -351,7 +354,14 @@ func checkFinish(a *Aid, pkt *RacePacket, now time.Time) {
 
 // someoneElseFinished reports whether another player in the room has really finished this
 // race (the server saw them complete it). Caller must hold mu.
+// raceHadFinisher is set once anyone legitimately finishes this race, and stays set if they
+// leave the room afterwards. Cleared at each race's countdown. Guarded by mu.
+var raceHadFinisher bool
+
 func someoneElseFinished(p *Player) bool {
+	if raceHadFinisher {
+		return true
+	}
 	for _, a := range aids {
 		for _, q := range a.players {
 			if q != p && q.progress.finishSeen && finishOK(&q.progress) {

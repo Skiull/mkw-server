@@ -303,6 +303,7 @@ func trackPlayerState(a *Aid, pkt *RacePacket, now time.Time) {
 			resetMovement(a)
 			resetHitChecks()
 			resetProgress(a)
+			raceHadFinisher = false
 			for _, b := range aids {
 				if b.bot != nil {
 					resetProgress(b)

@@ -399,6 +399,7 @@ func botRaceMode(rm []byte, mode common.GameMode, bot *Aid, ref *Aid, rp *replay
 			}
 		}
 		if ok {
+			raceHadFinisher = true // Bots finishing first end the race for everyone too.
 			records.PutBits(d, 45, 22, packFinishTime(ft))
 			if bit >= 0 && bit < raceModePlayerBits {
 				records.PutBits(d, bit, 1, 1)
