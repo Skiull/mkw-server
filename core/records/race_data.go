@@ -170,5 +170,9 @@ func (r *RaceData) KartActions() uint32 {
 	return v
 }
 
+// CloudZapFlip flips when a Thunder Cloud zaps the player (shrunk for 612 frames, word A
+// bit 23).
+func (r *RaceData) CloudZapFlip() byte { return r.data[0x29] >> 3 & 1 }
+
 // Raw returns the record's bytes (for diagnostics).
 func (r *RaceData) Raw() []byte { return r.data[:] }

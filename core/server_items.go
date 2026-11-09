@@ -88,7 +88,7 @@ func decideItem(engine *items.Engine, a *Aid, p *Player, now time.Time) (common.
 		p.grant = nil
 	}
 
-	req := items.Request{Mode: a.mode, InPlay: itemsInPlay(), Invincible: p.invincible(now), InMega: p.inMega(now)}
+	req := items.Request{Mode: a.mode, InPlay: itemsInPlay(now), Invincible: p.invincible(now), InMega: p.inMega(now)}
 	switch a.mode {
 	case common.ModeVS:
 		if p.rank == 0 {
@@ -180,6 +180,9 @@ const itemReturnWindow = 10 * time.Second
 func observeItems(a *Aid, pkt *RacePacket, now time.Time) error {
 	for i, st := range pkt.Items {
 		p := a.players[i]
+		if p.held == common.ThunderCloud && st.Held != common.ThunderCloud {
+			cloudUsedAt = now // Now over someone's head until it zaps.
+		}
 		p.held = st.Held
 		p.trailing = st.Trailing
 		expireGrant(p, now)
@@ -286,7 +289,7 @@ func aidMayUseObject(a *Aid, obj common.ItemObject) bool {
 // itemsInPlay counts item objects held, trailed, or granted but not yet shown, across the
 // room. Objects already on the track or flying (a dropped Banana, a Blue Shell on its way)
 // aren't visible to the server and aren't counted. Caller must hold mu.
-func itemsInPlay() map[common.ItemObject]int {
+func itemsInPlay(now time.Time) map[common.ItemObject]int {
 	counts := make(map[common.ItemObject]int)
 	add := func(item common.ItemType) {
 		if item != common.NoItem {
@@ -305,8 +308,17 @@ func itemsInPlay() map[common.ItemObject]int {
 			}
 		}
 	}
+	if !cloudUsedAt.IsZero() && now.Sub(cloudUsedAt) < cloudMaxActive {
+		counts[common.ThunderCloud.Object()]++
+	}
 	return counts
 }
+
+// A used Thunder Cloud floats over a player (passed on by bumping) until it zaps. It stays
+// in play from its use until a zap shows up, or cloudMaxActive at most. Guarded by mu.
+var cloudUsedAt time.Time
+
+const cloudMaxActive = 15 * time.Second
 
 // racingPlayerCount counts players (guests included) in the race. Caller must hold mu.
 func racingPlayerCount() int {

@@ -465,7 +465,12 @@ func TestThunderCloudInPlay(t *testing.T) {
 	gone.recs[recItem] = itemRec(common.NoItem, common.NoItem)
 	handle(a1, gone.build(), now)
 	a0.players[0].grant = nil
-	if item := requestItem(t, a0, 2, now.Add(2*time.Second)); item != common.ThunderCloud {
+	// Used: it floats over someone until it zaps, so still none.
+	if item := requestItem(t, a0, 2, now.Add(2*time.Second)); item != common.Mushroom {
+		t.Fatalf("got %v while a used Thunder Cloud is still out", item)
+	}
+	a0.players[0].grant = nil
+	if item := requestItem(t, a0, 3, now.Add(cloudMaxActive+time.Second)); item != common.ThunderCloud {
 		t.Fatalf("got %v once the Thunder Cloud was gone", item)
 	}
 }

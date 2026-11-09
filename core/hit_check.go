@@ -74,6 +74,10 @@ func observeHits(a *Aid, p *Player, rd *records.RaceData, now time.Time) {
 			lastBlueHitAt = now
 		}
 	}
+	if zap := rd.CloudZapFlip(); p.hitFlagsSeen && zap != p.cloudZap {
+		cloudUsedAt = time.Time{} // The Thunder Cloud is gone.
+	}
+	p.cloudZap = rd.CloudZapFlip()
 	actions := rd.KartActions() &^ hitActionsNoSlow
 	if p.hitFlagsSeen && actions != p.kartActions && !p.invincible(now) && p.move.lastSpeed >= hitMinSpeed {
 		e := expectHit(a, p, fmt.Sprintf("hit (KartAction bits %#x) without losing speed", actions^p.kartActions), now, hitSlowWait, false)

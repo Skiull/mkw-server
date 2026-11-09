@@ -53,6 +53,7 @@ type Player struct {
 	hitFlags, blueHitFlags byte
 	hitFlagsSeen           bool
 	kartActions            uint32 // KartAction flip bits seen last (RACEDATA word A).
+	cloudZap               byte   // Thunder Cloud zap flip bit seen last.
 	hitAt, rammedAt        time.Time
 	lastPos                [3]float32
 	lastPosAt              time.Time

@@ -304,6 +304,7 @@ func trackPlayerState(a *Aid, pkt *RacePacket, now time.Time) {
 			resetHitChecks()
 			resetProgress(a)
 			raceHadFinisher = false
+			cloudUsedAt = time.Time{}
 			for _, b := range aids {
 				if b.bot != nil {
 					resetProgress(b)
