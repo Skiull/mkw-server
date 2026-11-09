@@ -114,6 +114,14 @@ func checkMovement(p *Player, frame uint32, rd *records.RaceData, walls *items.W
 		if rd.StarFlip() != m.starFlip || rd.MegaFlip() != m.megaFlip {
 			m.boostUntil = max(m.boostUntil, frame+powerItemFrames)
 		}
+		// The game's own Star/Mega start events: exact, unlike noticing the granted item
+		// leave the item slot. The item rules use these (no Thunder Cloud, no second Mega).
+		if rd.StarFlip() != m.starFlip {
+			p.starAt = time.Now()
+		}
+		if rd.MegaFlip() != m.megaFlip {
+			p.megaAt = time.Now()
+		}
 		if rd.ThwompFlip() != m.thwompFlip {
 			m.squishSince = frame
 		}

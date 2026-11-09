@@ -394,8 +394,7 @@ func (p *Player) invincible(now time.Time) bool {
 	return within(p.starAt, starDuration) || p.inMega(now) || (within(p.bulletAt, bulletDuration) && !p.bulletEnded)
 }
 
-// inMega reports whether the player may still be in a Mega Mushroom (the movement check's
-// length, so a Thunder Cloud or a second Mega can't be pulled near its end).
+// inMega reports whether the player is in a Mega Mushroom (8 s), for the item rules.
 func (p *Player) inMega(now time.Time) bool {
-	return !p.megaAt.IsZero() && now.Sub(p.megaAt) <= megaDuration
+	return !p.megaAt.IsZero() && now.Sub(p.megaAt) <= megaItemWindow
 }
