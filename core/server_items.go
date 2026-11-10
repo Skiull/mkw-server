@@ -74,6 +74,12 @@ func decideItem(engine *items.Engine, a *Aid, p *Player, now time.Time) (common.
 		return common.NoItem, "not racing"
 	}
 
+	// Items circling or dragged behind the kart (the rest of a triple, a held Banana): the
+	// game gives nothing from a box until they're gone.
+	if p.trailing != common.NoItem {
+		return common.NoItem, fmt.Sprintf("still trailing %v", p.trailing)
+	}
+
 	expireGrant(p, now)
 	if p.grant != nil {
 		if now.Sub(p.grant.grantedAt) < minItemRequestInterval {
