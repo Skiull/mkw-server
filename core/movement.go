@@ -105,6 +105,7 @@ func checkMovement(p *Player, frame uint32, rd *records.RaceData, walls *items.W
 	if m.hasFlags {
 		if rd.CannonFlips() != m.cannonFlips {
 			m.exemptUntil = frame + cannonFrames
+			p.launchedAt = time.Now() // Ends any hit slowdown check (hit_check.go).
 		}
 		if rd.BulletBillFlip() != m.bulletFlip {
 			m.bulletUntil, m.bulletSeen, m.bulletEnded = frame+bulletFrames, false, false

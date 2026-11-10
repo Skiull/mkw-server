@@ -85,6 +85,9 @@ func observeHits(a *Aid, p *Player, rd *records.RaceData, now time.Time) {
 	}
 	p.kartActions = actions
 	p.hitFlags, p.blueHitFlags, p.hitFlagsSeen = flags, blue, true
+	if rd.Respawning() {
+		p.respawnedAt = now
+	}
 
 	if rd.HasPosition() {
 		pos := rd.WorldPos()
@@ -191,6 +194,8 @@ func resolveHits(now time.Time) (missed []*hitExpectation) {
 		}
 		switch {
 		case hit, e.aid.kicked:
+		case e.needSlow && (p.launchedAt.After(e.at) || p.respawnedAt.After(e.at)):
+			// A cannon or a respawn moves the kart on its own: its speed says nothing.
 		case e.speedAt < hitMinSpeed:
 			// Already slow: a hit can't be told apart from driving slowly. No verdict. (The
 			// Fake Item Box hit flag doesn't flip on real hits, so it can't be relied on.)

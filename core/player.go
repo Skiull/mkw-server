@@ -28,6 +28,9 @@ type Player struct {
 	// Item last seen trailing or circling that was accepted, and when.
 	trailItem   common.ItemType
 	trailItemAt time.Time
+	// Last cannon launch and respawn seen (they move the kart on their own).
+	launchedAt  time.Time
+	respawnedAt time.Time
 	// Held and trailing items in the player's latest ITEM record.
 	held     common.ItemType
 	trailing common.ItemType
