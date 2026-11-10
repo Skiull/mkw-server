@@ -194,8 +194,9 @@ func resolveHits(now time.Time) (missed []*hitExpectation) {
 		}
 		switch {
 		case hit, e.aid.kicked:
-		case e.needSlow && (p.launchedAt.After(e.at) || p.respawnedAt.After(e.at)):
-			// A cannon or a respawn moves the kart on its own: its speed says nothing.
+		case p.launchedAt.After(e.at.Add(-time.Second)) || p.respawnedAt.After(e.at):
+			// A cannon or a respawn moves the kart on its own: its speed says nothing. A hit
+			// reported as the kart enters a cannon can come after the launch started.
 		case e.speedAt < hitMinSpeed:
 			// Already slow: a hit can't be told apart from driving slowly. No verdict. (The
 			// Fake Item Box hit flag doesn't flip on real hits, so it can't be relied on.)
