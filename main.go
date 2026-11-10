@@ -67,7 +67,17 @@ func main() {
 	enforceMovement := flag.Bool("enforce-movement", false, "Strike aids whose movement fails the check instead of only logging it")
 	enforceBoxes := flag.Bool("enforce-boxes", false, "Refuse item requests that fail the item box check instead of only logging them (requires --course-dir)")
 
+	buildHumanLines := flag.String("build-human-lines", "", "Recordings folder (--record-dir): improve the AI bots' lines (--ai-bots) with players' runs, then exit")
+	humanLinesCourse := flag.Int("human-lines-course", -1, "With --build-human-lines: only this course")
 	flag.Parse()
+
+	if *buildHumanLines != "" {
+		if err := core.BuildHumanLines(*buildHumanLines, *aiBots, *humanLinesCourse); err != nil {
+			logging.Log("Human lines: %v", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	// Validate required arguments
 	if *roomAddr == "" {

@@ -139,6 +139,10 @@ func startAIDriver(dir string, course common.Course, character, vehicle byte, sl
 	// This grid slot's best saved run (slot_lines.go): replayed exactly, look-ahead only when
 	// knocked off it. Every race is recorded and kept if it beats the saved one.
 	drive := line
+	// The line improved with players' runs (human_lines.go), if there is one.
+	if hl := humanLinePath(line); fileExists(hl) {
+		drive = hl
+	}
 	exact := false
 	if best, ok := aiSlotBest(dir, course, slot, players, line); ok {
 		drive, exact = best, true
@@ -398,4 +402,9 @@ func aiBotFinish(bot *Aid) (records.FinishTime, bool) {
 	}
 	ms := d.finishAt * 1000 / 60
 	return addMilliseconds(records.FinishTime{}, ms), true
+}
+
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
 }
