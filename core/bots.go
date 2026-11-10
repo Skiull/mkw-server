@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"hash/crc32"
+	"math"
 	"net"
 	"time"
 
@@ -263,6 +264,7 @@ func botPackets(now time.Time) []outgoing {
 				}
 			}
 		}
+		botRunsOverItems(bot, ref, now)
 		for _, dest := range aids {
 			if dest.bot != nil || dest.kicked {
 				continue
@@ -559,4 +561,41 @@ func raceInfoPlayerCount(raceInfo []byte) int {
 		}
 	}
 	return n
+}
+
+// botRunsOverItems drops tracked ground items a bot drives through: on the players' screens
+// the bot hits them and they're gone, so nobody can be expected to hit them later.
+// Caller must hold mu.
+func botRunsOverItems(bot, ref *Aid, now time.Time) {
+	if len(bot.players) == 0 || len(groundItems) == 0 {
+		return
+	}
+	var data []byte
+	if s := bot.bot.ai; s != nil && s.driver != nil {
+		data = s.driver.latest(0)
+	} else if ref.mirror != nil {
+		data = botRaceData(ref.mirror, bot.bot.delay, now)
+	}
+	if len(data) < records.RaceDataLen {
+		return
+	}
+	rd, err := records.ParseRaceData(data[:records.RaceDataLen])
+	if err != nil || !rd.HasPosition() || rd.Respawning() {
+		return
+	}
+	p := bot.players[0]
+	pos := rd.WorldPos()
+	if !p.lastPosAt.IsZero() && now.Sub(p.lastPosAt) < time.Second {
+		kept := groundItems[:0]
+		for _, g := range groundItems {
+			if !g.reportOnly && math.Abs(float64(g.pos[1]-pos[1])) <= groundItemHeight &&
+				pointSegmentDistance(g.pos, p.lastPos, pos) <= g.radius() {
+				logging.Log("Bot aid %d ran over the %v at (%.0f, %.0f, %.0f)", bot.aid, g.obj, g.pos[0], g.pos[1], g.pos[2])
+				continue
+			}
+			kept = append(kept, g)
+		}
+		groundItems = kept
+	}
+	p.lastPos, p.lastPosAt = pos, now
 }
