@@ -172,6 +172,9 @@ func heldMatchesGrant(held, granted common.ItemType) bool {
 	return held == granted || (granted.Uses() > 1 && held.Object() == granted.Object())
 }
 
+// How long after an accepted trailing item was last seen it may still be thrown.
+const trailItemGrace = 5 * time.Second
+
 // How long after the last granted item was last seen it may reappear in the slot.
 const itemReturnWindow = 10 * time.Second
 
@@ -220,8 +223,14 @@ func observeItems(a *Aid, pkt *RacePacket, now time.Time) error {
 			p.lastItemSeenAt = now
 		}
 
-		if st.Trailing != common.NoItem && st.Trailing.Object() != p.lastItem.Object() && st.Trailing.Object() != p.prevItem.Object() {
-			return fmt.Errorf("player %d trails %v, last granted %v", i+1, st.Trailing, p.lastItem)
+		if st.Trailing != common.NoItem {
+			// Items keep circling or trailing while more boxes are collected (a triple shell
+			// can outlast two more grants), so one already accepted stays allowed.
+			kept := p.trailItem != common.NoItem && st.Trailing.Object() == p.trailItem.Object()
+			if !kept && st.Trailing.Object() != p.lastItem.Object() && st.Trailing.Object() != p.prevItem.Object() {
+				return fmt.Errorf("player %d trails %v, last granted %v", i+1, st.Trailing, p.lastItem)
+			}
+			p.trailItem, p.trailItemAt = st.Trailing, now
 		}
 	}
 
@@ -261,7 +270,7 @@ func observeItems(a *Aid, pkt *RacePacket, now time.Time) error {
 		if !slot.Action.IsOwnItem() {
 			continue
 		}
-		if !aidMayUseObject(a, slot.Object) {
+		if !aidMayUseObject(a, slot.Object, now) {
 			if leafPileItem(a, slot.Object, now) {
 				continue
 			}
@@ -277,8 +286,13 @@ func observeItems(a *Aid, pkt *RacePacket, now time.Time) error {
 	return nil
 }
 
-func aidMayUseObject(a *Aid, obj common.ItemObject) bool {
+func aidMayUseObject(a *Aid, obj common.ItemObject, now time.Time) bool {
 	for _, p := range a.players {
+		// Throwing the last of an accepted trailing item (the event can come after the
+		// ITEM record already shows it gone).
+		if p.trailItem != common.NoItem && p.trailItem.Object() == obj && now.Sub(p.trailItemAt) < trailItemGrace {
+			return true
+		}
 		if (p.lastItem != common.NoItem && p.lastItem.Object() == obj) || (p.prevItem != common.NoItem && p.prevItem.Object() == obj) {
 			return true
 		}
@@ -352,6 +366,7 @@ func resetItemState(a *Aid) {
 		p.grant = nil
 		p.lastItem = common.NoItem
 		p.prevItem = common.NoItem
+		p.trailItem = common.NoItem
 		p.held = common.NoItem
 		p.trailing = common.NoItem
 		p.hasRequested = false

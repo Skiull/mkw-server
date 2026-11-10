@@ -25,6 +25,9 @@ type Player struct {
 	lastItemSeenAt time.Time
 	// The item granted before lastItem: a player can trail it while holding a new one.
 	prevItem common.ItemType
+	// Item last seen trailing or circling that was accepted, and when.
+	trailItem   common.ItemType
+	trailItemAt time.Time
 	// Held and trailing items in the player's latest ITEM record.
 	held     common.ItemType
 	trailing common.ItemType
@@ -78,13 +81,14 @@ type itemGrant struct {
 
 func newPlayer(aid byte, isGuest bool) *Player {
 	return &Player{
-		aid:      aid,
-		isGuest:  isGuest,
-		lastItem: common.NoItem,
-		prevItem: common.NoItem,
-		held:     common.NoItem,
-		trailing: common.NoItem,
-		progress: newProgress(),
+		aid:       aid,
+		isGuest:   isGuest,
+		lastItem:  common.NoItem,
+		prevItem:  common.NoItem,
+		trailItem: common.NoItem,
+		held:      common.NoItem,
+		trailing:  common.NoItem,
+		progress:  newProgress(),
 		// Not a course yet: the first RaceData starts fresh progress.
 		progressCourse: common.NoVote,
 	}
