@@ -540,11 +540,21 @@ func loadRecording(path string) (*replayData, error) {
 }
 
 func buildHumanLine(dir string, course common.Course, base string, runs []*humanRun) error {
-	line, err := readLine(base)
+	rkg := strings.TrimSuffix(base, ".line") + ".rkg"
+	out := humanLinePath(base)
+	// Start from what was already learned (older recordings get deleted), so a rebuild only
+	// ever adds sections that beat the bot on its current line.
+	from := base
+	var prevMeta hlMeta
+	if data, err := os.ReadFile(strings.TrimSuffix(out, ".line") + ".json"); err == nil && fileExists(out) {
+		if json.Unmarshal(data, &prevMeta) == nil && prevMeta.Base == filepath.Base(base) {
+			from = out
+		}
+	}
+	line, err := readLine(from)
 	if err != nil {
 		return err
 	}
-	rkg := strings.TrimSuffix(base, ".line") + ".rkg"
 	_, lineVehicle, _ := aiGhostCombo(base)
 	bike := lineVehicle >= byte(common.StandardBikeS)
 	var use []*humanRun
@@ -568,7 +578,7 @@ func buildHumanLine(dir string, course common.Course, base string, runs []*human
 
 	// How the bot actually drives the base line, section by section.
 	rec := filepath.Join(tmp, "base-run.line")
-	baseFrames := kinokoRace(dir, base, rkg, 1, 1, rec)
+	baseFrames := kinokoRace(dir, from, rkg, 1, 1, rec)
 	botTimes := make([]float64, len(bs)-1)
 	for k := range botTimes {
 		botTimes[k] = math.Inf(1)
@@ -591,7 +601,7 @@ func buildHumanLine(dir string, course common.Course, base string, runs []*human
 	single := make([]int, len(cands))
 	var wg sync.WaitGroup
 	jobs := make(chan int)
-	for w := 0; w < max(1, runtime.NumCPU()/2); w++ {
+	for w := 0; w < hlWorkers(); w++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -637,12 +647,14 @@ func buildHumanLine(dir string, course common.Course, base string, runs []*human
 		logging.Log("Human lines: course %d %s: no section helped", course, filepath.Base(base))
 		return nil
 	}
-	out := humanLinePath(base)
 	if err := writeLine(out, splice(line, kept)); err != nil {
 		return err
 	}
 	copyFile(rkg, strings.TrimSuffix(out, ".line")+".rkg")
 	meta := hlMeta{Base: filepath.Base(base), Frames: best, BaseFrames: baseFrames, Date: time.Now().Format(time.RFC3339)}
+	if from == out {
+		meta.BaseFrames, meta.Splices = prevMeta.BaseFrames, prevMeta.Splices
+	}
 	for _, c := range kept {
 		meta.Splices = append(meta.Splices, fmt.Sprintf("frames %d-%d from %s aid %d (%.0f frames faster alone)", c.from, c.to, c.run.src, c.run.aid, c.gain))
 	}
@@ -691,5 +703,93 @@ func fmtFrames(f int) string {
 func copyFile(from, to string) {
 	if data, err := os.ReadFile(from); err == nil {
 		os.WriteFile(to, data, 0o644)
+	}
+}
+
+// Automatic rebuilds: when a race recording closes, its course is queued (lines/hl-queue/)
+// and one background builder at a time (this program with -build-human-lines, at low
+// priority so live races keep their CPU) works through the queue.
+
+// hlWorkers is how many Kinoko races a build runs at once: a quarter of the CPUs, so a build
+// doesn't slow the live bots.
+func hlWorkers() int { return max(1, runtime.NumCPU()/4) }
+
+func hlQueueDir(aiDir string) string { return filepath.Join(aiDir, "lines", "hl-queue") }
+
+// queueHumanLines asks for course to be rebuilt from the recordings, starting the builder
+// if it isn't running.
+func queueHumanLines(recordDir, aiDir string, course common.Course) {
+	if recordDir == "" || aiDir == "" || !course.IsValid(common.RoomSelect) {
+		return
+	}
+	q := hlQueueDir(aiDir)
+	os.MkdirAll(q, 0o755)
+	os.WriteFile(filepath.Join(q, strconv.Itoa(int(course))), nil, 0o644)
+	if hlBuilderRunning(aiDir) {
+		return
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	cmd := exec.Command(exe, "-build-human-lines", recordDir, "-ai-bots", aiDir, "-human-lines-queue")
+	cmd.Dir = filepath.Dir(exe)
+	detach(cmd)
+	if err := cmd.Start(); err != nil {
+		logging.Log("Human lines: can't start the builder: %v", err)
+		return
+	}
+	cmd.Process.Release()
+	logging.Log("Human lines: rebuilding course %d in the background", course)
+}
+
+func hlLockPath(aiDir string) string { return filepath.Join(hlQueueDir(aiDir), "builder.lock") }
+
+// A builder touches its lock while it works; one older than this is left from a crash.
+const hlLockStale = 15 * time.Minute
+
+func hlBuilderRunning(aiDir string) bool {
+	st, err := os.Stat(hlLockPath(aiDir))
+	return err == nil && time.Since(st.ModTime()) < hlLockStale
+}
+
+// RunHumanLinesQueue builds every queued course, until the queue is empty. Only one runs.
+func RunHumanLinesQueue(recordDir, aiDir string) error {
+	lock := hlLockPath(aiDir)
+	os.MkdirAll(hlQueueDir(aiDir), 0o755)
+	if hlBuilderRunning(aiDir) {
+		return nil
+	}
+	os.WriteFile(lock, []byte(strconv.Itoa(os.Getpid())), 0o644)
+	defer os.Remove(lock)
+	stop := make(chan struct{})
+	defer close(stop)
+	go func() {
+		for {
+			select {
+			case <-stop:
+				return
+			case <-time.After(time.Minute):
+				now := time.Now()
+				os.Chtimes(lock, now, now)
+			}
+		}
+	}()
+	for {
+		entries, _ := os.ReadDir(hlQueueDir(aiDir))
+		course := -1
+		for _, e := range entries {
+			if c, err := strconv.Atoi(e.Name()); err == nil {
+				course = c
+				os.Remove(filepath.Join(hlQueueDir(aiDir), e.Name()))
+				break
+			}
+		}
+		if course < 0 {
+			return nil
+		}
+		if err := BuildHumanLines(recordDir, aiDir, course); err != nil {
+			logging.Log("Human lines: course %d: %v", course, err)
+		}
 	}
 }

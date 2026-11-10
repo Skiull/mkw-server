@@ -69,8 +69,16 @@ func main() {
 
 	buildHumanLines := flag.String("build-human-lines", "", "Recordings folder (--record-dir): improve the AI bots' lines (--ai-bots) with players' runs, then exit")
 	humanLinesCourse := flag.Int("human-lines-course", -1, "With --build-human-lines: only this course")
+	humanLinesQueue := flag.Bool("human-lines-queue", false, "With --build-human-lines: build the courses rooms queued after their races (started by the rooms)")
 	flag.Parse()
 
+	if *buildHumanLines != "" && *humanLinesQueue {
+		if err := core.RunHumanLinesQueue(*buildHumanLines, *aiBots); err != nil {
+			logging.Log("Human lines: %v", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if *buildHumanLines != "" {
 		if err := core.BuildHumanLines(*buildHumanLines, *aiBots, *humanLinesCourse); err != nil {
 			logging.Log("Human lines: %v", err)

@@ -108,6 +108,10 @@ func stopPacketRecording() {
 	}
 	pktRec.w.Close()
 	pktRec.f.Close()
+	// Bots learn from the players' runs in it (human_lines.go).
+	if len(pktRec.players) > 0 && room.config.AIBotDir != "" {
+		queueHumanLines(room.config.RecordDir, room.config.AIBotDir, pktRec.course)
+	}
 	pktRec = nil
 }
 
