@@ -166,6 +166,39 @@ func (w *Walls) Crosses(a, b [3]float32) (int, bool) {
 	return -1, false
 }
 
+// Near returns the normal of the closest wall whose front side p is within r of (by distance
+// to the wall's plane, with p over the triangle's bounds widened by r).
+func (w *Walls) Near(p [3]float32, r float32) ([3]float32, bool) {
+	if w == nil {
+		return [3]float32{}, false
+	}
+	var best [3]float32
+	bestD, found := r, false
+	for cx := cell(p[0] - r); cx <= cell(p[0]+r); cx++ {
+		for cz := cell(p[2] - r); cz <= cell(p[2]+r); cz++ {
+			for _, i := range w.cells[[2]int32{cx, cz}] {
+				if int(i) >= len(w.Norms) {
+					continue
+				}
+				t := w.Tris[i]
+				out := false
+				for k := 0; k < 3; k++ {
+					if p[k] < min(t[0][k], t[1][k], t[2][k])-r || p[k] > max(t[0][k], t[1][k], t[2][k])+r {
+						out = true
+					}
+				}
+				if out {
+					continue
+				}
+				if d := dot3(sub3(p, t[0]), w.Norms[i]); d >= 0 && d < bestD {
+					best, bestD, found = w.Norms[i], d, true
+				}
+			}
+		}
+	}
+	return best, found
+}
+
 // segmentHitsTriangle is the Möller-Trumbore test limited to the segment a-b.
 func segmentHitsTriangle(a, b [3]float32, t [3][3]float32) bool {
 	const eps = 1e-6

@@ -59,18 +59,20 @@ type moveSample struct {
 }
 
 type moveState struct {
-	samples     []moveSample
-	cannonFlips byte
-	bulletFlip  byte
-	exemptUntil uint32 // Cannon flight: no checks until this frame.
-	bulletUntil uint32
-	bulletSeen  bool // Bullet Bill speed seen since the last Bullet Bill use.
-	bulletEnded bool // Back to driving speed since; may still turn out to be a wall bump.
-	hasFlags    bool
-	maxSpeed    float32 // Fastest average seen this race, for tuning the limits.
-	lastLog     time.Time
-	violations  int // Movement violations this race.
-	lastSpeed   float32
+	samples        []moveSample
+	cannonFlips    byte
+	bulletFlip     byte
+	exemptUntil    uint32 // Cannon flight: no checks until this frame.
+	bulletUntil    uint32
+	bulletSeen     bool // Bullet Bill speed seen since the last Bullet Bill use.
+	bulletEnded    bool // Back to driving speed since; may still turn out to be a wall bump.
+	hasFlags       bool
+	maxSpeed       float32 // Fastest average seen this race, for tuning the limits.
+	lastLog        time.Time
+	violations     int // Movement violations this race.
+	lastSpeed      float32
+	lastSlideFrame uint32
+	wallSlides     int // Wall hits taken without losing speed this race (No Wall Effect).
 
 	// Offroad check (see offroad.go).
 	floors                                *items.Floors
@@ -179,6 +181,9 @@ func checkMovement(p *Player, frame uint32, rd *records.RaceData, walls *items.W
 		}
 	}
 	m.samples = append(m.samples, moveSample{frame, pos})
+	if problem == "" && frame >= m.bulletUntil && !mega {
+		problem = checkWallSlide(m, walls)
+	}
 	// A leaf pile's Mushroom may not show as a boost: count a recent pile as one.
 	trackOffroad(m, frame, pos, mega || within(p.leafPileAt, 3*time.Second, time.Now()))
 
@@ -424,3 +429,79 @@ func onStickyRoad(f *items.Floors, pos [3]float32) bool {
 	ty, ok := f.At(pos)
 	return ok && (ty == items.FloorStickyRoad || ty == items.FloorMovingRoad || ty == items.FloorRotatingRoad)
 }
+
+// No Wall Effect codes let a kart that drives into a wall slide along it at full speed. A
+// real wall hit costs speed: at most the part of the speed along the wall is kept, and in
+// practice less (recorded legit hits kept at most 0.88 of it; the code 1.26-1.69).
+const (
+	wallSlideRadius   = 250  // Kart center to wall plane, in course units.
+	wallSlideMinInto  = 0.25 // Fraction of the speed heading into the wall.
+	wallSlideMinSpeed = 50   // u/f
+	wallSlideKept     = 1.05 // Speed kept over the along-the-wall part that counts.
+	wallSlideKick     = 3    // Slides in one race before it's a violation.
+	wallSlideMinGap   = 3    // Frames between samples.
+	wallSlideMaxGap   = 8
+)
+
+// checkWallSlide looks at the last three samples for a wall hit that cost no speed. Returns
+// a violation once a race has wallSlideKick of them.
+func checkWallSlide(m *moveState, walls *items.Walls) string {
+	n := len(m.samples)
+	if walls == nil || n < 3 {
+		return ""
+	}
+	// Samples a few frames apart, so a frame of timing noise doesn't swamp the speeds.
+	c := m.samples[n-1]
+	bi := n - 2
+	for bi > 0 && c.frame-m.samples[bi].frame < wallSlideMinGap {
+		bi--
+	}
+	ai := bi - 1
+	for ai > 0 && m.samples[bi].frame-m.samples[ai].frame < wallSlideMinGap {
+		ai--
+	}
+	if ai < 0 {
+		return ""
+	}
+	a, b := m.samples[ai], m.samples[bi]
+	dt0, dt1 := float32(b.frame-a.frame), float32(c.frame-b.frame)
+	if dt0 < wallSlideMinGap || dt1 < wallSlideMinGap || dt0 > wallSlideMaxGap || dt1 > wallSlideMaxGap {
+		return ""
+	}
+	if m.lastSlideFrame != 0 && b.frame <= m.lastSlideFrame {
+		return "" // Same hit as the last one counted.
+	}
+	v0 := scaleVec(subVec(b.pos, a.pos), 1/dt0)
+	v1 := scaleVec(subVec(c.pos, b.pos), 1/dt1)
+	s0, s1 := lenVec(v0), lenVec(v1)
+	if s0 < wallSlideMinSpeed {
+		return ""
+	}
+	nrm, ok := walls.Near(b.pos, wallSlideRadius)
+	if !ok || nrm[1] > 0.5 || nrm[1] < -0.5 {
+		return "" // Not a wall beside the kart (a slope or ceiling).
+	}
+	into0, into1 := -dotVec(v0, nrm), -dotVec(v1, nrm)
+	if into0 < wallSlideMinInto*s0 || into1 > 0.3*into0 {
+		return "" // Not driving into it, or not stopped by it.
+	}
+	along := float32(math.Sqrt(float64(max(s0*s0-into0*into0, 1))))
+	if s1 <= wallSlideKept*along {
+		return ""
+	}
+	m.wallSlides++
+	m.lastSlideFrame = c.frame
+	logging.Log("Wall hit without losing speed (%d this race): %.0f u/f, %.0f%% into the wall, then %.0f u/f (along-wall part %.0f) at frame %d",
+		m.wallSlides, s0, 100*into0/s0, s1, along, c.frame)
+	if m.wallSlides == wallSlideKick {
+		return fmt.Sprintf("hit walls %d times without losing speed (no-wall-effect code)", m.wallSlides)
+	}
+	return ""
+}
+
+func subVec(a, b [3]float32) [3]float32 { return [3]float32{a[0] - b[0], a[1] - b[1], a[2] - b[2]} }
+func scaleVec(a [3]float32, k float32) [3]float32 {
+	return [3]float32{a[0] * k, a[1] * k, a[2] * k}
+}
+func dotVec(a, b [3]float32) float32 { return a[0]*b[0] + a[1]*b[1] + a[2]*b[2] }
+func lenVec(a [3]float32) float32    { return float32(math.Sqrt(float64(dotVec(a, a)))) }
