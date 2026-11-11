@@ -153,6 +153,9 @@ func removeHitItem(a *Aid, obj common.ItemObject, now time.Time) {
 	if cancelled {
 		return
 	}
+	if obj == common.ObjGreenShell || obj == common.ObjRedShell {
+		shellHitGroundItem(a, p.lastPos, now)
+	}
 
 	best, bestDist := -1, float32(ownItemHitRadius)
 	for i, g := range groundItems {
@@ -247,4 +250,35 @@ func airborne(f *items.Floors, pos [3]float32) bool {
 	}
 	h, ok := f.Height(pos[0], pos[1]+50, pos[2], 1000)
 	return !ok || pos[1]-h > airborneHeight
+}
+
+// shellHitGroundItem handles a shell reported destroyed (HIT-FREE on a Green or Red Shell).
+// The report carries the reporter's kart position, not the shell's, and the item the shell
+// ran into may be reported only as the shell: so the nearest tracked Banana or Fake Item Box
+// within ownItemHitRadius may be gone. A drive-through counted on it moments ago is dropped
+// (seen 11-10: a Green Shell took out a Banana a second before another player drove there,
+// and only the shell was reported, after). Caller must hold mu.
+func shellHitGroundItem(reporter *Aid, at [3]float32, now time.Time) {
+	kept := hitExpectations[:0]
+	for _, e := range hitExpectations {
+		if e.item != nil && now.Sub(e.at) < ownItemHitWindow && items.Distance(e.item.pos, at) < ownItemHitRadius {
+			logging.Log("Aid %d: the %v it drove through at (%.0f, %.0f, %.0f) was likely hit by aid %d's shell first",
+				e.aid.aid, e.item.obj, e.item.pos[0], e.item.pos[1], e.item.pos[2], reporter.aid)
+			continue
+		}
+		kept = append(kept, e)
+	}
+	hitExpectations = kept
+
+	best, bestDist := -1, float32(ownItemHitRadius)
+	for i, g := range groundItems {
+		if d := items.Distance(g.pos, at); d < bestDist {
+			best, bestDist = i, d
+		}
+	}
+	if best >= 0 {
+		g := groundItems[best]
+		groundItems = append(groundItems[:best], groundItems[best+1:]...)
+		logging.Log("Aid %d's shell was hit %.0f units from aid %d's %v: no longer tracked", reporter.aid, bestDist, g.owner.aid, g.obj)
+	}
 }

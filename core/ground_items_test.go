@@ -244,3 +244,24 @@ func TestGroundItemNotSent(t *testing.T) {
 		t.Fatal("item not counted as sent")
 	}
 }
+
+// A shell reported destroyed near a Banana someone just "drove through": the shell likely
+// took the Banana out first, so no kick.
+func TestShellHitCancelsDriveThrough(t *testing.T) {
+	setupRoom(t, Config{KickNoHit: true})
+	owner := addTestAid(t, 1, false)
+	driver := addTestAid(t, 0, false)
+	now := time.Now()
+	g := &groundItem{obj: common.ObjBanana, pos: [3]float32{4715, 9968, -37693}, owner: owner, at: now.Add(-time.Minute), seenBy: 0x7fff}
+	groundItems = []*groundItem{g}
+	p := driver.players[0]
+	p.move.lastSpeed = 83
+	e := expectHit(driver, p, "drove through a Banana", now, ramDeadline, false)
+	e.item = g
+	owner.players[0].lastPos = [3]float32{2993, 9854, -38950}
+	removeHitItem(owner, common.ObjGreenShell, now.Add(time.Second))
+	resolveHits(now.Add(3 * time.Second))
+	if driver.kicked {
+		t.Fatal("kicked for a Banana a shell had destroyed")
+	}
+}
