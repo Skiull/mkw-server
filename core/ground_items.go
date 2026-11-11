@@ -13,9 +13,9 @@ import (
 
 // Ground items (log only): Bananas and Fake Item Boxes lying on the track. The throw's EVENT
 // data gives where an item spawns and its velocity (the thrower's included). A Banana flies
-// with constant horizontal speed and 1.05 u/f^2 gravity (at half the real horizontal speed, see trackShotLanding) and settles 150 units above the
-// floor (fitted to test throws: landings within 150 units of where they were hit, 55 on
-// average). Fake Item Boxes use 1.2 u/f^2; thrown ones land less predictably (they seem
+// with constant horizontal speed and 2.22 u/f^2 gravity and settles 150 units above the
+// floor (fitted to 125 logged throw/hit pairs, 10-28 to 11-10: median 136 units from where
+// they were hit, 90% within 363). Fake Item Boxes use 2.5 u/f^2; thrown ones land less predictably (they seem
 // to bounce), so they're only checked against the player's own hit reports. Throws faster than the 127 u/f the record can hold, and throws from the
 // air (ramps, trick snipes), aren't tracked.
 // A player who drives through one must get hit, so a no-hit code shows up even though its
@@ -24,8 +24,8 @@ import (
 const (
 	groundItemRadius    = 60  // Kart center to item, in course units.
 	groundItemHeight    = 250 // Allowed height difference.
-	bananaGravity       = 1.05
-	fakeBoxGravity      = 1.2
+	bananaGravity       = 2.22
+	fakeBoxGravity      = 2.5
 	itemRestHeight      = 150 // An item's position settles this far above the floor.
 	fakeBoxDropMaxSpeed = 45  // Horizontal spawn speed (u/f) of a dropped (not thrown) box.
 	maxThrowHeight      = 400 // Throws from higher above the floor aren't tracked.
@@ -122,12 +122,7 @@ func trackShotLanding(a *Aid, s *records.Shot, slot int, raw byte, now time.Time
 		// player passed beside it a lap later): too loose to say someone drove through one,
 		// close enough to check a player's own report of hitting one.
 	}
-	// The gravity fits were made when x and z were read at half scale (records/shot.go):
-	// with the real velocity they would need about twice the gravity (a landing distance
-	// is vx*2vy/g), but not exactly (the drop to the floor). Keep the fitted arcs until
-	// they're refit or replaced by Kinoko's item movement.
-	fitVel := [3]float32{s.Vel[0] / 2, s.Vel[1], s.Vel[2] / 2}
-	pos, ok := c.ThrowLanding(s.Pos, fitVel, g, itemRestHeight)
+	pos, ok := c.ThrowLanding(s.Pos, s.Vel, g, itemRestHeight)
 	if !ok {
 		return // Off the course, or it hits a wall on the way and bounces.
 	}
