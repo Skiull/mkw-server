@@ -37,6 +37,30 @@ type learnedFile struct {
 	GameHashes        []string `json:"gameHashes"`
 	LoginHashes       []string `json:"loginHashes"`
 	MutableDataBlocks []int    `json:"mutableDataBlocks"`
+	// Blocks known cheats write: never learned or treated as normal, even from a trusted
+	// player testing a cheat.
+	CheatDataBlocks []int `json:"cheatDataBlocks"`
+}
+
+// StaticR.rel .data blocks known cheats write (1 KiB from the section start).
+var builtinCheatDataBlocks = []int{
+	45, 46, // Instant Mini Turbo + Stand-Still MT (80 8B1278, 80 8B1400-08)
+}
+
+// Guarded by mu.
+var cheatDataBlocks = map[int]bool{}
+
+func init() {
+	for _, b := range builtinCheatDataBlocks {
+		cheatDataBlocks[b] = true
+	}
+}
+
+// dropCheatBlocks takes known cheat blocks off the normal list.
+func dropCheatBlocks(m map[int]bool) {
+	for b := range cheatDataBlocks {
+		delete(m, b)
+	}
 }
 
 // Guarded by mu.
@@ -106,9 +130,13 @@ func LoadLearned(path string, config *Config) error {
 	if config.MutableDataBlocks == nil {
 		config.MutableDataBlocks = map[int]bool{}
 	}
+	for _, b := range f.CheatDataBlocks {
+		cheatDataBlocks[b] = true
+	}
 	for _, b := range f.MutableDataBlocks {
 		config.MutableDataBlocks[b] = true
 	}
+	dropCheatBlocks(config.MutableDataBlocks)
 	return nil
 }
 
@@ -207,6 +235,10 @@ func handleLoginHash(a *Aid, data []byte) {
 func learnDataBlocks(a *Aid, blocks []int) {
 	var added []int
 	for _, b := range blocks {
+		if cheatDataBlocks[b] {
+			logging.Log("Not learning .data block %d from trusted aid %d: a known cheat writes it", b, a.aid)
+			continue
+		}
 		if !room.config.MutableDataBlocks[b] {
 			if room.config.MutableDataBlocks == nil {
 				room.config.MutableDataBlocks = map[int]bool{}
@@ -235,8 +267,14 @@ func saveLearned() {
 		f.LoginHashes = append(f.LoginHashes, fmt.Sprintf("%016x", h))
 	}
 	for b := range room.config.MutableDataBlocks {
-		f.MutableDataBlocks = append(f.MutableDataBlocks, b)
+		if !cheatDataBlocks[b] {
+			f.MutableDataBlocks = append(f.MutableDataBlocks, b)
+		}
 	}
+	for b := range cheatDataBlocks {
+		f.CheatDataBlocks = append(f.CheatDataBlocks, b)
+	}
+	slices.Sort(f.CheatDataBlocks)
 	slices.Sort(f.GameHashes)
 	slices.Sort(f.LoginHashes)
 	slices.Sort(f.MutableDataBlocks)
@@ -256,7 +294,12 @@ func saveLearned() {
 					f.LoginHashes = union(f.LoginHashes, prev.LoginHashes)
 				}
 				// Normal .data blocks don't depend on the build: always keep them.
-				f.MutableDataBlocks = union(f.MutableDataBlocks, prev.MutableDataBlocks)
+				f.CheatDataBlocks = union(f.CheatDataBlocks, prev.CheatDataBlocks)
+				cheat := map[int]bool{}
+				for _, b := range f.CheatDataBlocks {
+					cheat[b] = true
+				}
+				f.MutableDataBlocks = slices.DeleteFunc(union(f.MutableDataBlocks, prev.MutableDataBlocks), func(b int) bool { return cheat[b] })
 				data, _ = json.MarshalIndent(f, "", " ")
 			}
 		}

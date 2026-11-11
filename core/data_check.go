@@ -52,7 +52,7 @@ func handleDataChanges(a *Aid, data []byte, now time.Time) {
 	}
 	var unexpected []int
 	for _, b := range changed {
-		if !room.config.MutableDataBlocks[b] {
+		if !room.config.MutableDataBlocks[b] || cheatDataBlocks[b] {
 			unexpected = append(unexpected, b)
 		}
 	}

@@ -50,7 +50,6 @@ func TestTrustedPlayerLearning(t *testing.T) {
 		t.Fatal("trusted game hash not learned")
 	}
 
-
 	// Trusted player changes block 9: learned, not kicked. Then someone else changing it
 	// is normal too.
 	handleDataChanges(trusted, []byte{'G', 'D', 0, 10, 0x00, 0x40}, time.Now())
@@ -118,5 +117,15 @@ func TestNewBuildReplacesOld(t *testing.T) {
 	}
 	if f.Build != 200 || len(f.GameHashes) != 1 || f.GameHashes[0] != "0000000000000222" || len(f.LoginHashes) != 1 {
 		t.Fatalf("saved %+v", f)
+	}
+}
+
+// A trusted player running a known cheat doesn't teach the server its blocks are normal.
+func TestCheatBlocksNotLearned(t *testing.T) {
+	setupRoom(t, Config{})
+	a := addTestAid(t, 0, false)
+	learnDataBlocks(a, []int{44, 45, 46})
+	if !room.config.MutableDataBlocks[44] || room.config.MutableDataBlocks[45] || room.config.MutableDataBlocks[46] {
+		t.Fatalf("normal blocks: %v", room.config.MutableDataBlocks)
 	}
 }
