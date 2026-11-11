@@ -44,7 +44,7 @@ const (
 	ownThrowHitWindow = 3 * time.Second
 	hitReportSlack    = 400  // Position lag between touching an item and the report (a few frames at ~90 u/f).
 	droppedDistance   = 600  // Landing this close to the spawn point counts as a drop.
-	maxThrowDistance  = 6000 // Items landing further from where they were thrown aren't tracked.
+	maxThrowDistance  = 12000 // Items landing further from where they were thrown aren't tracked (forward tosses land ~9000 ahead).
 )
 
 type groundItem struct {
