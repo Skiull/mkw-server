@@ -47,6 +47,8 @@ type Config struct {
 	// Folder with our Kinoko build (kinoko.exe, Race/, lines/) for AI bots (ai_bots.go).
 	// Empty: bots mirror a real player instead.
 	AIBotDir string
+	// Rebuild the AI bots' lines from players' runs after each recorded race (human_lines.go).
+	LearnLines bool
 	// Folder for race recordings (recorder.go). Empty: off.
 	RecordDir string
 	// Also record raw race-state bytes when they change (diagnostics).

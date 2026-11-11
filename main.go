@@ -69,6 +69,7 @@ func main() {
 
 	buildHumanLines := flag.String("build-human-lines", "", "Recordings folder (--record-dir): improve the AI bots' lines (--ai-bots) with players' runs, then exit")
 	humanLinesCourse := flag.Int("human-lines-course", -1, "With --build-human-lines: only this course")
+	learnLines := flag.Bool("learn-lines", false, "With --ai-bots and --record-packets: rebuild the bots' lines from players' runs after each race")
 	humanLinesQueue := flag.Bool("human-lines-queue", false, "With --build-human-lines: build the courses rooms queued after their races (started by the rooms)")
 	flag.Parse()
 
@@ -163,6 +164,7 @@ func main() {
 	config.KickNoHit = *kickNoHit
 	config.RecordDir = *recordDir
 	config.AIBotDir = *aiBots
+	config.LearnLines = *learnLines
 	config.RecordRaw = *recordRaw
 	config.RecordPackets = *recordPackets
 	if *replayFile != "" {
