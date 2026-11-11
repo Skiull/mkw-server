@@ -78,6 +78,29 @@ func trackShot(a *Aid, s *records.Shot, slot int, raw byte, now time.Time) {
 	if s.Object != common.ObjBanana && s.Object != common.ObjFakeItemBox {
 		return
 	}
+	n := len(groundItems)
+	trackShotLanding(a, s, slot, raw, now)
+	if len(groundItems) == n || (n == maxGroundItems && groundItems[len(groundItems)-1].at != now) {
+		untrackedThrow(a, s)
+	}
+}
+
+// untrackedThrow handles a Banana or Fake Item Box thrown where its landing can't be
+// predicted (from the air, too fast, onto a hazard...). It can still land on a tracked item
+// and take it out unreported (11-10: a Banana thrown off a Thwomp did), so tracked items it
+// could reach are only checked against players' own hit reports from now on.
+func untrackedThrow(a *Aid, s *records.Shot) {
+	for _, g := range groundItems {
+		if !g.reportOnly && items.Distance(g.pos, s.Pos) < maxThrowDistance {
+			g.reportOnly = true
+			logging.Log("Aid %d's untracked %v throw may reach aid %d's %v at (%.0f, %.0f, %.0f): report-only now",
+				a.aid, s.Object, g.owner.aid, g.obj, g.pos[0], g.pos[1], g.pos[2])
+		}
+	}
+}
+
+// trackShotLanding predicts where a throw lands and tracks it there, if it can.
+func trackShotLanding(a *Aid, s *records.Shot, slot int, raw byte, now time.Time) {
 	// The velocity bytes top out at 127: a faster throw's real speed isn't known.
 	for _, v := range s.Vel {
 		if v >= 127 || v <= -127 {

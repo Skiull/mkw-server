@@ -265,3 +265,16 @@ func TestShellHitCancelsDriveThrough(t *testing.T) {
 		t.Fatal("kicked for a Banana a shell had destroyed")
 	}
 }
+
+// A Banana thrown from high up (untracked) near a tracked one: the tracked one is no longer
+// checked on drive-throughs (the untracked one may have hit it).
+func TestUntrackedThrowMakesNearbyReportOnly(t *testing.T) {
+	setupRoom(t, Config{})
+	a := addTestAid(t, 0, false)
+	g := &groundItem{obj: common.ObjBanana, pos: [3]float32{1000, 0, 1000}, owner: a, at: time.Now()}
+	groundItems = []*groundItem{g}
+	untrackedThrow(a, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 3000, 0}})
+	if !g.reportOnly {
+		t.Fatal("nearby tracked item still checked on drive-throughs")
+	}
+}
