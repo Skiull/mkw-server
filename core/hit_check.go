@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"mkw-server/common"
 	"mkw-server/core/records"
 	"mkw-server/items"
 	"mkw-server/logging"
@@ -16,8 +17,8 @@ import (
 //   - Blue Shell: hits someone (normally the leader) within a few seconds;
 //   - driving through a tracked ground item (ground_items.go);
 //   - a Green Shell whose simulated path runs into them (shell_paths.go, log only).
-// A no-hit code also stops the game reporting item hits (EVENT HIT-FREE), and those reports
-// also come from the player's own items hitting things, so they aren't used.
+//   - the player's own game reporting that an item hit them (EVENT HIT-FREE, code 0x02):
+//     item vanish and pass-through codes still send it but skip the hit (reportedItemHit).
 // Each expected hit must show up from the victim as a hit flag flipping (RACEDATA 0x2C) or
 // a clear slowdown. If neither does, it's logged as a possible no-hit code.
 
@@ -230,6 +231,28 @@ func resolveHits(now time.Time) (missed []*hitExpectation) {
 	}
 	hitExpectations = kept
 	return missed
+}
+
+// Items whose hit always flips the victim's hit flags (recordings 11-10 and 11-11: every real
+// report came with the flag change in the same packet). Not Blooper, Lightning, POW...
+var reportedHitObjects = map[common.ItemObject]bool{
+	common.ObjBanana: true, common.ObjFakeItemBox: true, common.ObjGreenShell: true,
+	common.ObjRedShell: true, common.ObjBobOmb: true, common.ObjBlueShell: true,
+}
+
+// reportedItemHit expects a hit when a's game says an item hit it (code 0x02). A code that
+// makes touched items vanish, or lets karts drive through them, still sends this (11-11:
+// a Banana, a Fake Item Box, a Green Shell and two Bob-ombs, no hit flag all race).
+// Caller must hold mu.
+func reportedItemHit(a *Aid, r *records.ItemReport, now time.Time) {
+	if r.Code != records.ItemReportHit || !reportedHitObjects[r.Object] || len(a.players) == 0 || a.bot != nil {
+		return
+	}
+	p := a.players[0]
+	if p.invincible(now) || now.Sub(p.hitAt) < time.Second {
+		return // Already tumbling from another hit: the flags may not change again.
+	}
+	expectHit(a, p, fmt.Sprintf("reported being hit by a %v", r.Object), now, ramDeadline, false)
 }
 
 func playerIndex(a *Aid, p *Player) int {

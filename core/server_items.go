@@ -267,6 +267,7 @@ func observeItems(a *Aid, pkt *RacePacket, now time.Time) error {
 		}
 		if r, ok := pkt.Event.ItemReportAt(i); ok {
 			shellReport(a, r, now)
+			reportedItemHit(a, r, now)
 		}
 		if slot.Action == common.EventHitFree && len(a.players) > 0 {
 			p := a.players[0]

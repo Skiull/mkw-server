@@ -3,6 +3,9 @@ package core
 import (
 	"testing"
 	"time"
+
+	"mkw-server/common"
+	"mkw-server/core/records"
 )
 
 func TestRamWithoutHitIsLogged(t *testing.T) {
@@ -86,5 +89,33 @@ func TestNoHitKick(t *testing.T) {
 	resolveHits(now.Add(5 * time.Second))
 	if !victim.kicked {
 		t.Fatal("not kicked for skipping a Lightning")
+	}
+}
+
+func TestReportedItemHitWithoutHitIsNoHit(t *testing.T) {
+	setupRoom(t, Config{})
+	a := addTestAid(t, 0, false)
+	p := a.players[0]
+	p.move.lastSpeed = 100
+	now := time.Now()
+	r := &records.ItemReport{Object: common.ObjBanana, Code: records.ItemReportHit}
+
+	// Item vanish: the game reports the Banana hit, the kart never spins or slows.
+	reportedItemHit(a, r, now)
+	if missed := resolveHits(now.Add(2 * time.Second)); len(missed) != 1 {
+		t.Fatalf("%d missed hits, want 1", len(missed))
+	}
+
+	// A real hit: the hit flags flip.
+	reportedItemHit(a, r, now)
+	p.hitAt = now.Add(50 * time.Millisecond)
+	if missed := resolveHits(now.Add(2 * time.Second)); len(missed) != 0 {
+		t.Fatalf("%d missed hits, want 0", len(missed))
+	}
+
+	// Blooper ink doesn't flip the hit flags: not checked.
+	reportedItemHit(a, &records.ItemReport{Object: common.ObjBlooper, Code: records.ItemReportHit}, now.Add(3*time.Second))
+	if len(hitExpectations) != 0 {
+		t.Fatal("Blooper report expected a hit")
 	}
 }
