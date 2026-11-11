@@ -15,6 +15,9 @@ type Aid struct {
 
 	// When this aid's packets last carried a Lightning use to each other aid (relayed.go).
 	lightningSentTo map[byte]time.Time
+	// This aid's player ids in the current race, from its RaceInfo (relayed.go).
+	playerIds          []int
+	lastEventPlayerMsg string // Last logged item event naming another player.
 
 	aid      byte
 	isHost   bool

@@ -124,8 +124,8 @@ func TestNewBuildReplacesOld(t *testing.T) {
 func TestCheatBlocksNotLearned(t *testing.T) {
 	setupRoom(t, Config{})
 	a := addTestAid(t, 0, false)
-	learnDataBlocks(a, []int{44, 45, 46})
-	if !room.config.MutableDataBlocks[44] || room.config.MutableDataBlocks[45] || room.config.MutableDataBlocks[46] {
+	learnDataBlocks(a, []int{47, 45, 46})
+	if !room.config.MutableDataBlocks[47] || room.config.MutableDataBlocks[45] || room.config.MutableDataBlocks[46] {
 		t.Fatalf("normal blocks: %v", room.config.MutableDataBlocks)
 	}
 }

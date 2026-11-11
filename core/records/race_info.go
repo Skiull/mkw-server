@@ -117,6 +117,17 @@ func ParseRaceInfo(data []byte) (*RaceInfo, error) {
 	}, nil
 }
 
+// PlayerIds are the player ids (grid order) the race's player map gives an aid.
+func (r *RaceInfo) PlayerIds(aid byte) []int {
+	var ids []int
+	for id, a := range r.playerIdToAidMap {
+		if a == aid {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
 func (r *RaceInfo) Course() common.Course {
 	return r.coursePlayed
 }
