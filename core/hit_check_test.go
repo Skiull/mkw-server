@@ -72,9 +72,16 @@ func TestNoHitKick(t *testing.T) {
 	if victim.kicked {
 		t.Fatal("kicked for a ram (lag decides those)")
 	}
-	// Lightning hits everyone: missing it kicks.
+	// A Lightning the attacker's packets never told the victim about: nothing to be hit by.
 	victim.raceStarted = true
 	v.move.lastSpeed = 80
+	expectLightning(attacker, now)
+	resolveHits(now.Add(5 * time.Second))
+	if victim.kicked {
+		t.Fatal("kicked for a Lightning their game was never sent")
+	}
+	// Lightning hits everyone: missing one their game was sent kicks.
+	attacker.lightningSentTo = map[byte]time.Time{victim.aid: now}
 	expectLightning(attacker, now)
 	resolveHits(now.Add(5 * time.Second))
 	if !victim.kicked {

@@ -23,11 +23,11 @@ func TestDroppedBananaExpectsHit(t *testing.T) {
 	now := time.Now()
 
 	// Too fast for the record (clamped at 127): not tracked.
-	trackShot(owner, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 0, 5000}, Vel: [3]float32{50, 40, 127}}, now)
+	trackShotSeen(owner, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 0, 5000}, Vel: [3]float32{50, 40, 127}}, now)
 	// Thrown from high in the air: not tracked.
-	trackShot(owner, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 900, 5000}, Vel: [3]float32{0, 40, 70}}, now)
+	trackShotSeen(owner, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 900, 5000}, Vel: [3]float32{0, 40, 70}}, now)
 	// Dropped in place: tracked.
-	trackShot(owner, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 0, 0}, Vel: [3]float32{-3, 7, -1}}, now)
+	trackShotSeen(owner, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 0, 0}, Vel: [3]float32{-3, 7, -1}}, now)
 	if len(groundItems) != 1 {
 		t.Fatalf("tracking %d items, want 1", len(groundItems))
 	}
@@ -50,7 +50,7 @@ func TestHitReportRemovesItem(t *testing.T) {
 	setupRoom(t, flatCourse())
 	owner := addTestAid(t, 0, false)
 	other := addTestAid(t, 1, false)
-	trackShot(owner, &records.Shot{Object: common.ObjFakeItemBox, Pos: [3]float32{1000, 0, 0}}, time.Now())
+	trackShotSeen(owner, &records.Shot{Object: common.ObjFakeItemBox, Pos: [3]float32{1000, 0, 0}}, time.Now())
 	// Reported from 650 away: the reporter's own item hit it. Removed, no hit expected.
 	other.players[0].lastPos = [3]float32{1650, 0, 0}
 	removeHitItem(other, common.ObjFakeItemBox, time.Now())
@@ -64,7 +64,7 @@ func TestDrivingIntoVanishingItemExpectsHit(t *testing.T) {
 	owner := addTestAid(t, 0, false)
 	other := addTestAid(t, 1, false)
 	now := time.Now()
-	trackShot(owner, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{1000, 0, 0}}, now)
+	trackShotSeen(owner, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{1000, 0, 0}}, now)
 	other.players[0].lastPos = [3]float32{1050, 0, 0}
 	other.players[0].move.lastSpeed = 90
 	removeHitItem(other, common.ObjBanana, now)
@@ -83,7 +83,7 @@ func TestSlowPassGetsNoVerdict(t *testing.T) {
 	p.move.lastSpeed = 20 // Turned around, driving slowly back into it.
 	now := time.Now()
 	for _, obj := range []common.ItemObject{common.ObjFakeItemBox, common.ObjBanana} {
-		trackShot(owner, &records.Shot{Object: obj, Pos: [3]float32{0, 0, 0}}, now)
+		trackShotSeen(owner, &records.Shot{Object: obj, Pos: [3]float32{0, 0, 0}}, now)
 		later := now.Add(10 * time.Second)
 		checkGroundItems(owner, p, [3]float32{-100, 0, 0}, [3]float32{100, 0, 0}, later)
 		if missed := resolveHits(later.Add(2 * time.Second)); len(missed) != 0 {
@@ -101,7 +101,7 @@ func TestFakeItemBoxHitBySlowdown(t *testing.T) {
 	p := other.players[0]
 	p.move.lastSpeed = 97
 	now := time.Now()
-	trackShot(owner, &records.Shot{Object: common.ObjFakeItemBox, Pos: [3]float32{0, 0, 0}}, now)
+	trackShotSeen(owner, &records.Shot{Object: common.ObjFakeItemBox, Pos: [3]float32{0, 0, 0}}, now)
 	checkGroundItems(other, p, [3]float32{-100, 0, 0}, [3]float32{100, 0, 0}, now)
 	p.move.lastSpeed = 7
 	if missed := resolveHits(now.Add(2 * time.Second)); len(missed) != 0 {
@@ -116,7 +116,7 @@ func TestOwnerHitsOwnThrownBanana(t *testing.T) {
 	p.move.lastSpeed = 90
 	now := time.Now()
 	// Thrown forward: lands far ahead. Driving into it a second later is a real hit.
-	trackShot(owner, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 0, 0}, Vel: [3]float32{0, 30, 100}}, now)
+	trackShotSeen(owner, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 0, 0}, Vel: [3]float32{0, 30, 100}}, now)
 	if len(groundItems) != 1 || groundItems[0].dropped {
 		t.Fatal("thrown Banana not tracked as thrown")
 	}
@@ -138,7 +138,7 @@ func TestThrownFakeItemBoxOnlyChecksReports(t *testing.T) {
 	owner := addTestAid(t, 0, false)
 	other := addTestAid(t, 1, false)
 	now := time.Now()
-	trackShot(owner, &records.Shot{Object: common.ObjFakeItemBox, Pos: [3]float32{0, 0, 0}, Vel: [3]float32{0, 30, 90}}, now)
+	trackShotSeen(owner, &records.Shot{Object: common.ObjFakeItemBox, Pos: [3]float32{0, 0, 0}, Vel: [3]float32{0, 30, 90}}, now)
 	if len(groundItems) != 1 || !groundItems[0].reportOnly {
 		t.Fatal("thrown Fake Item Box not tracked for reports")
 	}
@@ -162,7 +162,7 @@ func TestOwnShellDestroyedBanana(t *testing.T) {
 		setupRoom(t, flatCourse())
 		a := addTestAid(t, 0, false)
 		now := time.Now()
-		trackShot(a, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 0, 0}, Vel: [3]float32{-3, 7, -1}}, now)
+		trackShotSeen(a, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 0, 0}, Vel: [3]float32{-3, 7, -1}}, now)
 		later := now.Add(3 * time.Second)
 		report := func() {
 			a.players[0].lastPos = [3]float32{0, 0, -860} // The kart, well behind the Banana.
@@ -187,7 +187,7 @@ func TestOwnFreshThrowHitIsRemoved(t *testing.T) {
 	setupRoom(t, flatCourse())
 	a := addTestAid(t, 0, false)
 	now := time.Now()
-	trackShot(a, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 0, 0}, Vel: [3]float32{0, 10, 40}}, now)
+	trackShotSeen(a, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 0, 0}, Vel: [3]float32{0, 10, 40}}, now)
 	if len(groundItems) != 1 {
 		t.Fatalf("%d tracked", len(groundItems))
 	}
@@ -206,16 +206,41 @@ func TestUntrackedNearHazardsAndLongThrows(t *testing.T) {
 	setupRoom(t, cfg)
 	a := addTestAid(t, 0, false)
 	now := time.Now()
-	trackShot(a, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 0, 1800}, Vel: [3]float32{-3, 7, -1}}, now)
+	trackShotSeen(a, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 0, 1800}, Vel: [3]float32{-3, 7, -1}}, now)
 	if len(groundItems) != 0 {
 		t.Fatal("tracked a Banana dropped next to a geyser")
 	}
-	trackShot(a, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 0, -9000}, Vel: [3]float32{0, 40, -130}}, now)
+	trackShotSeen(a, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 0, -9000}, Vel: [3]float32{0, 40, -130}}, now)
 	if len(groundItems) != 0 {
 		t.Fatal("tracked a Banana thrown far")
 	}
-	trackShot(a, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 0, -6000}, Vel: [3]float32{-3, 7, -1}}, now)
+	trackShotSeen(a, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 0, -6000}, Vel: [3]float32{-3, 7, -1}}, now)
 	if len(groundItems) != 1 {
 		t.Fatalf("%d tracked, want the plain drop", len(groundItems))
+	}
+}
+
+// trackShotSeen tracks a throw that the thrower's packets told every player about.
+func trackShotSeen(a *Aid, s *records.Shot, now time.Time) {
+	n := len(groundItems)
+	trackShot(a, s, 0, 0, now)
+	if len(groundItems) > n || (n == maxGroundItems && len(groundItems) == n) {
+		groundItems[len(groundItems)-1].seenBy = 0x7fff
+	}
+}
+
+// A Banana whose throw was left out of the victim's packets isn't expected to hit them.
+func TestGroundItemNotSent(t *testing.T) {
+	setupRoom(t, Config{})
+	owner := addTestAid(t, 0, false)
+	victim := addTestAid(t, 1, false)
+	now := time.Now()
+	g := &groundItem{obj: common.ObjBanana, owner: owner, at: now, seenBy: 1 << 2}
+	if g.sentTo(victim, now) {
+		t.Fatal("item counted as sent to an aid its packets skipped")
+	}
+	g.seenBy |= 1 << victim.aid
+	if !g.sentTo(victim, now) {
+		t.Fatal("item not counted as sent")
 	}
 }

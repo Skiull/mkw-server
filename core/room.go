@@ -241,6 +241,8 @@ func handlePacket(addr net.Addr, data []byte, now time.Time) []net.Addr {
 		}
 	}
 
+	noteRelayedEvents(a, pkt, now)
+
 	if !a.isRacer && pkt.Select != nil {
 		logging.Log("Aid %d sent select!", a.aid)
 		a.isRacer = true

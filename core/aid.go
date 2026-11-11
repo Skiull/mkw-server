@@ -13,6 +13,9 @@ import (
 type Aid struct {
 	addr *net.UDPAddr // The resolved UDP address of this aid
 
+	// When this aid's packets last carried a Lightning use to each other aid (relayed.go).
+	lightningSentTo map[byte]time.Time
+
 	aid      byte
 	isHost   bool
 	hasGuest bool

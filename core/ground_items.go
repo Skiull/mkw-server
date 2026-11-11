@@ -57,6 +57,10 @@ type groundItem struct {
 	dropped bool
 	// Only checked against the player's own hit reports (position not precise enough).
 	reportOnly bool
+	// The throw's EVENT slot, and the aids the owner's packets told about it (relayed.go).
+	slot   int
+	raw    byte
+	seenBy uint16
 }
 
 // ownerGrace reports whether a's touching g is just its owner driving off a fresh drop.
@@ -70,7 +74,7 @@ func (g *groundItem) ownerGrace(a *Aid, now time.Time) bool {
 var groundItems []*groundItem
 
 // trackShot starts tracking a dropped Banana or Fake Item Box. Caller must hold mu.
-func trackShot(a *Aid, s *records.Shot, now time.Time) {
+func trackShot(a *Aid, s *records.Shot, slot int, raw byte, now time.Time) {
 	if s.Object != common.ObjBanana && s.Object != common.ObjFakeItemBox {
 		return
 	}
@@ -118,7 +122,7 @@ func trackShot(a *Aid, s *records.Shot, now time.Time) {
 	if len(groundItems) >= maxGroundItems {
 		groundItems = groundItems[1:]
 	}
-	groundItems = append(groundItems, &groundItem{obj: s.Object, pos: pos, owner: a, at: now, reportOnly: reportOnly,
+	groundItems = append(groundItems, &groundItem{obj: s.Object, pos: pos, owner: a, at: now, reportOnly: reportOnly, slot: slot, raw: raw,
 		dropped: items.Distance([3]float32{pos[0], 0, pos[2]}, [3]float32{s.Pos[0], 0, s.Pos[2]}) < droppedDistance})
 }
 
@@ -192,7 +196,7 @@ func checkGroundItems(a *Aid, p *Player, prev, pos [3]float32, now time.Time) {
 		if now.Sub(g.at) > groundItemLifetime {
 			continue
 		}
-		hit := !g.reportOnly && !g.ownerGrace(a, now) &&
+		hit := !g.reportOnly && !g.ownerGrace(a, now) && g.sentTo(a, now) &&
 			math.Abs(float64(g.pos[1]-pos[1])) <= groundItemHeight &&
 			pointSegmentDistance(g.pos, prev, pos) <= g.radius()
 		if !hit {

@@ -54,6 +54,8 @@ type hitExpectation struct {
 	// The player's own game said it got hit: only a slowdown counts (a "keep speed when
 	// hit" code still spins but doesn't slow down).
 	needSlow bool
+	// Caused by this aid's item (Lightning): only if its packets to the victim said so.
+	sentBy *Aid
 }
 
 // Guarded by mu.
@@ -144,7 +146,8 @@ func expectLightning(user *Aid, now time.Time) {
 		}
 		for _, p := range a.players {
 			if !p.invincible(now) {
-				expectHit(a, p, fmt.Sprintf("Lightning from aid %d", user.aid), now, lightningWait, false)
+				e := expectHit(a, p, fmt.Sprintf("Lightning from aid %d", user.aid), now, lightningWait, false)
+				e.sentBy = user
 			}
 		}
 	}
@@ -202,6 +205,10 @@ func resolveHits(now time.Time) (missed []*hitExpectation) {
 			// Fake Item Box hit flag doesn't flip on real hits, so it can't be relied on.)
 		case p.invincible(now) && !e.anyone && !e.needSlow:
 			// Became invincible in time (a Star or Bullet Bill dodges it).
+		case now.After(e.deadline) && !itemReachedVictim(e):
+			// The item's user never told the victim's game about it: nothing to dodge.
+			logging.Log("Aid %d: %s was never sent to its game; not a no-hit", e.aid.aid, e.reason)
+			recordFlag(e.sentBy, fmt.Sprintf("item not sent to aid %d: %s", e.aid.aid, e.reason), now)
 		case now.After(e.deadline):
 			logging.Log("Aid %d player %d possible no-hit code: %s; speed only fell %.0f -> %.0f u/f",
 				e.aid.aid, playerIndex(e.aid, p), e.reason, e.speedAt, e.minSpeed)
