@@ -23,11 +23,11 @@ func TestDroppedBananaExpectsHit(t *testing.T) {
 	now := time.Now()
 
 	// Too fast for the record (clamped at 127): not tracked.
-	trackShotSeen(owner, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 0, 5000}, Vel: [3]float32{50, 40, 127}}, now)
+	trackShotSeen(owner, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 0, 5000}, Vel: [3]float32{100, 40, 254}}, now)
 	// Thrown from high in the air: not tracked.
-	trackShotSeen(owner, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 900, 5000}, Vel: [3]float32{0, 40, 70}}, now)
+	trackShotSeen(owner, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 900, 5000}, Vel: [3]float32{0, 40, 140}}, now)
 	// Dropped in place: tracked.
-	trackShotSeen(owner, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 0, 0}, Vel: [3]float32{-3, 7, -1}}, now)
+	trackShotSeen(owner, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 0, 0}, Vel: [3]float32{-6, 7, -2}}, now)
 	if len(groundItems) != 1 {
 		t.Fatalf("tracking %d items, want 1", len(groundItems))
 	}
@@ -116,7 +116,7 @@ func TestOwnerHitsOwnThrownBanana(t *testing.T) {
 	p.move.lastSpeed = 90
 	now := time.Now()
 	// Thrown forward: lands far ahead. Driving into it a second later is a real hit.
-	trackShotSeen(owner, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 0, 0}, Vel: [3]float32{0, 30, 100}}, now)
+	trackShotSeen(owner, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 0, 0}, Vel: [3]float32{0, 30, 200}}, now)
 	if len(groundItems) != 1 || groundItems[0].dropped {
 		t.Fatal("thrown Banana not tracked as thrown")
 	}
@@ -138,7 +138,7 @@ func TestThrownFakeItemBoxOnlyChecksReports(t *testing.T) {
 	owner := addTestAid(t, 0, false)
 	other := addTestAid(t, 1, false)
 	now := time.Now()
-	trackShotSeen(owner, &records.Shot{Object: common.ObjFakeItemBox, Pos: [3]float32{0, 0, 0}, Vel: [3]float32{0, 30, 90}}, now)
+	trackShotSeen(owner, &records.Shot{Object: common.ObjFakeItemBox, Pos: [3]float32{0, 0, 0}, Vel: [3]float32{0, 30, 180}}, now)
 	if len(groundItems) != 1 || !groundItems[0].reportOnly {
 		t.Fatal("thrown Fake Item Box not tracked for reports")
 	}
@@ -162,7 +162,7 @@ func TestOwnShellDestroyedBanana(t *testing.T) {
 		setupRoom(t, flatCourse())
 		a := addTestAid(t, 0, false)
 		now := time.Now()
-		trackShotSeen(a, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 0, 0}, Vel: [3]float32{-3, 7, -1}}, now)
+		trackShotSeen(a, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 0, 0}, Vel: [3]float32{-6, 7, -2}}, now)
 		later := now.Add(3 * time.Second)
 		report := func() {
 			a.players[0].lastPos = [3]float32{0, 0, -860} // The kart, well behind the Banana.
@@ -187,7 +187,7 @@ func TestOwnFreshThrowHitIsRemoved(t *testing.T) {
 	setupRoom(t, flatCourse())
 	a := addTestAid(t, 0, false)
 	now := time.Now()
-	trackShotSeen(a, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 0, 0}, Vel: [3]float32{0, 10, 40}}, now)
+	trackShotSeen(a, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 0, 0}, Vel: [3]float32{0, 10, 80}}, now)
 	if len(groundItems) != 1 {
 		t.Fatalf("%d tracked", len(groundItems))
 	}
@@ -206,15 +206,15 @@ func TestUntrackedNearHazardsAndLongThrows(t *testing.T) {
 	setupRoom(t, cfg)
 	a := addTestAid(t, 0, false)
 	now := time.Now()
-	trackShotSeen(a, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 0, 1800}, Vel: [3]float32{-3, 7, -1}}, now)
+	trackShotSeen(a, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 0, 1800}, Vel: [3]float32{-6, 7, -2}}, now)
 	if len(groundItems) != 0 {
 		t.Fatal("tracked a Banana dropped next to a geyser")
 	}
-	trackShotSeen(a, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 0, -9000}, Vel: [3]float32{0, 40, -130}}, now)
+	trackShotSeen(a, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 0, -9000}, Vel: [3]float32{0, 40, -260}}, now)
 	if len(groundItems) != 0 {
 		t.Fatal("tracked a Banana thrown far")
 	}
-	trackShotSeen(a, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 0, -6000}, Vel: [3]float32{-3, 7, -1}}, now)
+	trackShotSeen(a, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{0, 0, -6000}, Vel: [3]float32{-6, 7, -2}}, now)
 	if len(groundItems) != 1 {
 		t.Fatalf("%d tracked, want the plain drop", len(groundItems))
 	}

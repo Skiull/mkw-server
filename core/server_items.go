@@ -260,7 +260,13 @@ func observeItems(a *Aid, pkt *RacePacket, now time.Time) error {
 				logging.Log("Aid %d threw %v from (%.0f, %.0f, %.0f) at (%.0f, %.0f, %.0f) u/f", a.aid, shot.Object,
 					shot.Pos[0], shot.Pos[1], shot.Pos[2], shot.Vel[0], shot.Vel[1], shot.Vel[2])
 				trackShot(a, shot, i, pkt.Event.RawSlots[i], now)
+				if d, ok := pkt.Event.SlotData(i); ok {
+					simulateShell(a, shot, d, now)
+				}
 			}
+		}
+		if r, ok := pkt.Event.ItemReportAt(i); ok {
+			shellReport(a, r, now)
 		}
 		if slot.Action == common.EventHitFree && len(a.players) > 0 {
 			p := a.players[0]

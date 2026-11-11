@@ -13,7 +13,7 @@ import (
 
 // Ground items (log only): Bananas and Fake Item Boxes lying on the track. The throw's EVENT
 // data gives where an item spawns and its velocity (the thrower's included). A Banana flies
-// with constant horizontal speed and 1.05 u/f^2 gravity and settles 150 units above the
+// with constant horizontal speed and 1.05 u/f^2 gravity (at half the real horizontal speed, see trackShotLanding) and settles 150 units above the
 // floor (fitted to test throws: landings within 150 units of where they were hit, 55 on
 // average). Fake Item Boxes use 1.2 u/f^2; thrown ones land less predictably (they seem
 // to bounce), so they're only checked against the player's own hit reports. Throws faster than the 127 u/f the record can hold, and throws from the
@@ -101,11 +101,10 @@ func untrackedThrow(a *Aid, s *records.Shot) {
 
 // trackShotLanding predicts where a throw lands and tracks it there, if it can.
 func trackShotLanding(a *Aid, s *records.Shot, slot int, raw byte, now time.Time) {
-	// The velocity bytes top out at 127: a faster throw's real speed isn't known.
-	for _, v := range s.Vel {
-		if v >= 127 || v <= -127 {
-			return
-		}
+	// The velocity bytes top out at 127 (x and z are packed halved): a faster throw's real
+	// speed isn't known.
+	if v := s.Vel; abs32(v[1]) >= 127 || abs32(v[0]) >= 254 || abs32(v[2]) >= 254 {
+		return
 	}
 	c := room.config.Courses[a.course]
 	if c == nil || c.Floors == nil {
@@ -123,7 +122,12 @@ func trackShotLanding(a *Aid, s *records.Shot, slot int, raw byte, now time.Time
 		// player passed beside it a lap later): too loose to say someone drove through one,
 		// close enough to check a player's own report of hitting one.
 	}
-	pos, ok := c.ThrowLanding(s.Pos, s.Vel, g, itemRestHeight)
+	// The gravity fits were made when x and z were read at half scale (records/shot.go):
+	// with the real velocity they would need about twice the gravity (a landing distance
+	// is vx*2vy/g), but not exactly (the drop to the floor). Keep the fitted arcs until
+	// they're refit or replaced by Kinoko's item movement.
+	fitVel := [3]float32{s.Vel[0] / 2, s.Vel[1], s.Vel[2] / 2}
+	pos, ok := c.ThrowLanding(s.Pos, fitVel, g, itemRestHeight)
 	if !ok {
 		return // Off the course, or it hits a wall on the way and bounces.
 	}

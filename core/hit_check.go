@@ -14,7 +14,8 @@ import (
 //   - ramming: driving into someone while in a Star, Mega or Bullet Bill;
 //   - Lightning: hits everyone else who isn't invincible;
 //   - Blue Shell: hits someone (normally the leader) within a few seconds;
-//   - driving through a tracked ground item (ground_items.go).
+//   - driving through a tracked ground item (ground_items.go);
+//   - a Green Shell whose simulated path runs into them (shell_paths.go, log only).
 // A no-hit code also stops the game reporting item hits (EVENT HIT-FREE), and those reports
 // also come from the player's own items hitting things, so they aren't used.
 // Each expected hit must show up from the victim as a hit flag flipping (RACEDATA 0x2C) or
@@ -56,6 +57,10 @@ type hitExpectation struct {
 	needSlow bool
 	// Caused by this aid's item (Lightning): only if its packets to the victim said so.
 	sentBy *Aid
+	// The simulated Green Shell, if that's the reason, and whether the victim reported
+	// being hit by it (EVENT action 4, code 0x02).
+	shell    *shellPath
+	reported bool
 }
 
 // Guarded by mu.
@@ -98,6 +103,7 @@ func observeHits(a *Aid, p *Player, rd *records.RaceData, now time.Time) {
 		}
 		p.lastPos, p.lastPosAt = pos, now
 		checkRams(a, p, now)
+		checkShells(a, p, now)
 	}
 	resolveHits(now)
 }
@@ -189,7 +195,7 @@ func resolveHits(now time.Time) (missed []*hitExpectation) {
 		e.minSpeed = min(e.minSpeed, p.move.lastSpeed)
 		flagged := p.hitAt.After(e.at) || (e.anyone && lastBlueHitAt.After(e.at))
 		slowed := e.minSpeed <= hitStopSpeed || (e.speedAt > hitStopSpeed && e.minSpeed <= e.speedAt*hitSlowdown)
-		hit := flagged || slowed
+		hit := flagged || slowed || e.reported
 		if e.needSlow {
 			// A real hit drops speed to a fraction (recorded: 140->12, 70->14); a "keep speed"
 			// code holds 85-95%. Lenient so a soft hit isn't kicked.
@@ -239,4 +245,5 @@ func playerIndex(a *Aid, p *Player) int {
 func resetHitChecks() {
 	hitExpectations = nil
 	resetGroundItems()
+	resetShellPaths()
 }

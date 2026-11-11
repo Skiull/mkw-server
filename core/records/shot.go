@@ -6,15 +6,36 @@ import (
 	"mkw-server/common"
 )
 
-// Shot is a thrown or dropped item, from an EVENT "Shot" slot's data. Decoded from
-// captured throws (undocumented): position as int16 x4 at 0x8, velocity as int8 u/f at
-// 0x11. Green Shells, Bananas and Fake Item Boxes take 20 bytes; Red Shells and Bob-ombs
-// add a byte (likely the target).
+// Shot is a thrown or dropped item, from an EVENT "Shot" slot's data (the game's serializer,
+// see kinoko/docs/thrown-items.md): [0..2) race frame of the throw, [2] 0xC0 | owner,
+// [3] owner's item counter, [4..8) item flags, [8..14) position as int16 x4, [14..17)
+// previous position minus position, [17..20) velocity as int8 (x/2, y, z/2) u/f. Green
+// Shells, Bananas and Fake Item Boxes take 20 bytes; Red Shells and Bob-ombs add a byte
+// (likely the target).
 type Shot struct {
-	Object common.ItemObject
-	Pos    [3]float32
-	Vel    [3]float32
+	Object  common.ItemObject
+	Frame   uint16 // Race frame of the throw.
+	Owner   byte   // Player index on the thrower's console.
+	Counter byte   // The owner's item counter; EVENT action-4 slots name the item by it.
+	Pos     [3]float32
+	Vel     [3]float32
+	// Green Shell dropped behind: bit 1 of the velocity y byte, the speed is negative.
+	Reverse bool
 }
+
+// ItemReport is an EVENT action-4 (HitFree) slot: [frame u16][owner][item counter][code].
+type ItemReport struct {
+	Object  common.ItemObject
+	Frame   uint16
+	Owner   byte // The item's owner (low bits; the shot header has 0xC0 | owner).
+	Counter byte
+	Code    byte
+}
+
+const (
+	ItemReportDestroyed = 0xC1 // The owner's game says the item was destroyed.
+	ItemReportHit       = 0x02 // The sender says the item hit them.
+)
 
 const shotLen = 20
 
@@ -66,8 +87,26 @@ func (e *Event) ShotAt(i int) (*Shot, bool) {
 	}
 	pos := func(o int) float32 { return float32(int16(binary.BigEndian.Uint16(d[o:]))) * 4 }
 	return &Shot{
-		Object: s.Object,
-		Pos:    [3]float32{pos(8), pos(10), pos(12)},
-		Vel:    [3]float32{float32(int8(d[17])), float32(int8(d[18])), float32(int8(d[19]))},
+		Object:  s.Object,
+		Frame:   binary.BigEndian.Uint16(d),
+		Owner:   d[2] &^ 0xC0,
+		Counter: d[3],
+		Pos:     [3]float32{pos(8), pos(10), pos(12)},
+		// x and z are packed halved (clamped to +-255 first).
+		Vel:     [3]float32{float32(int8(d[17])) * 2, float32(int8(d[18])), float32(int8(d[19])) * 2},
+		Reverse: d[18]&2 != 0,
 	}, true
+}
+
+// ItemReportAt decodes slot i as an ItemReport (action 4).
+func (e *Event) ItemReportAt(i int) (*ItemReport, bool) {
+	s := e.Slots[i]
+	if s.Action != common.EventHitFree {
+		return nil, false
+	}
+	d, ok := e.SlotData(i)
+	if !ok || len(d) < 5 {
+		return nil, false
+	}
+	return &ItemReport{Object: s.Object, Frame: binary.BigEndian.Uint16(d), Owner: d[2] &^ 0xC0, Counter: d[3], Code: d[4]}, true
 }
