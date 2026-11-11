@@ -44,9 +44,13 @@ type learnedFile struct {
 
 // StaticR.rel .data blocks known cheats write: 256 bytes each from the section start (USA:
 // 0x808AE520, 679 blocks). Of the codes in host/cheat-tests, only Instant MT writes .data;
-// the others patch code (caught by the game hash) or run their own.
+// the others patch code (caught by the game hash) or run their own. The rest are from the
+// Gecko code database (codes.rc24.xyz RMCE01/RMCP01); PAL .data starts 0x48C0 later.
 var builtinCheatDataBlocks = []int{
+	43,     // MegaMushroom lasts for ever [mdmwii] (PAL 80 8B59C4, USA 80 8B1104)
+	44,     // Bullet Bill Speed Mod 2 [mdmwii] (USA 80 8B1138)
 	45, 46, // Instant Mini Turbo + Stand-Still MT (80 8B1278, 80 8B1400-08)
+	// Not listed: Gravity Modifier writes block 55, which normal play changes too.
 }
 
 // Guarded by mu.
