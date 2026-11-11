@@ -117,11 +117,11 @@ func trackShotLanding(a *Aid, s *records.Shot, slot int, raw byte, now time.Time
 	}
 	g, reportOnly := float32(bananaGravity), false
 	if s.Object == common.ObjFakeItemBox {
-		g = fakeBoxGravity
-		// Thrown boxes land within about 300 units of the prediction, sometimes 600 (they
-		// seem to bounce): too loose to say someone drove through one, close enough to
-		// check a player's own report of hitting one.
-		reportOnly = math.Hypot(float64(s.Vel[0]), float64(s.Vel[2])) > fakeBoxDropMaxSpeed
+		g, reportOnly = fakeBoxGravity, true
+		// Boxes land within about 300 units of the prediction, sometimes 600 (they seem to
+		// bounce), dropped ones too (11-10: a dropped box counted as driven through when the
+		// player passed beside it a lap later): too loose to say someone drove through one,
+		// close enough to check a player's own report of hitting one.
 	}
 	pos, ok := c.ThrowLanding(s.Pos, s.Vel, g, itemRestHeight)
 	if !ok {
