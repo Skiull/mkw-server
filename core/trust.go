@@ -42,7 +42,9 @@ type learnedFile struct {
 	CheatDataBlocks []int `json:"cheatDataBlocks"`
 }
 
-// StaticR.rel .data blocks known cheats write (1 KiB from the section start).
+// StaticR.rel .data blocks known cheats write: 256 bytes each from the section start (USA:
+// 0x808AE520, 679 blocks). Of the codes in host/cheat-tests, only Instant MT writes .data;
+// the others patch code (caught by the game hash) or run their own.
 var builtinCheatDataBlocks = []int{
 	45, 46, // Instant Mini Turbo + Stand-Still MT (80 8B1278, 80 8B1400-08)
 }
