@@ -309,6 +309,7 @@ func trackPlayerState(a *Aid, pkt *RacePacket, now time.Time) {
 			resetProgress(a)
 			raceHadFinisher = false
 			cloudUsedAt = time.Time{}
+			blueThrownAt = time.Time{}
 			for _, b := range aids {
 				if b.bot != nil {
 					resetProgress(b)

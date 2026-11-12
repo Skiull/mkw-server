@@ -80,6 +80,7 @@ func observeHits(a *Aid, p *Player, rd *records.RaceData, now time.Time) {
 		}
 		if blue != p.blueHitFlags {
 			lastBlueHitAt = now
+			blueThrownAt = time.Time{} // It exploded (or a Bob-omb did: frees it a bit early).
 		}
 	}
 	if zap := rd.CloudZapFlip(); p.hitFlagsSeen && zap != p.cloudZap {

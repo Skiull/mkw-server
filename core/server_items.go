@@ -289,6 +289,7 @@ func observeItems(a *Aid, pkt *RacePacket, now time.Time) error {
 			lightningStruck(a)
 		case common.ObjBlueShell:
 			expectBlueShell(a, now)
+			blueThrownAt = now // Flying until it explodes.
 		}
 	}
 	return nil
@@ -333,6 +334,9 @@ func itemsInPlay(now time.Time) map[common.ItemObject]int {
 	if !cloudUsedAt.IsZero() && now.Sub(cloudUsedAt) < cloudMaxActive {
 		counts[common.ThunderCloud.Object()]++
 	}
+	if !blueThrownAt.IsZero() && now.Sub(blueThrownAt) < blueShellWait {
+		counts[common.ObjBlueShell]++
+	}
 	return counts
 }
 
@@ -341,6 +345,11 @@ func itemsInPlay(now time.Time) map[common.ItemObject]int {
 var cloudUsedAt time.Time
 
 const cloudMaxActive = 15 * time.Second
+
+// A thrown Blue Shell flies until it explodes, and like the game, nobody can pull another
+// meanwhile. It stays in play from its use until a Blue Shell hit flag flips anywhere in the
+// room, or blueShellWait at most. Guarded by mu.
+var blueThrownAt time.Time
 
 // racingPlayerCount counts players (guests included) in the race. Caller must hold mu.
 func racingPlayerCount() int {
