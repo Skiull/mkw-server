@@ -2,12 +2,14 @@ package core
 
 import (
 	"bufio"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"mkw-server/common"
 	"mkw-server/core/records"
+	"mkw-server/items"
 )
 
 func TestParseKinokoItems(t *testing.T) {
@@ -78,5 +80,25 @@ func TestShellDestroyedOnlyByOwner(t *testing.T) {
 	shellReport(owner, r, time.Now())
 	if s.cut != 21 {
 		t.Fatalf("cut %d, want 21", s.cut)
+	}
+}
+
+// A Banana dropped on course 28 (11-11, untracked by the fit: "at an edge")
+// lands in Kinoko. Needs MKW_KINOKO_DIR (the AI bot folder with kinoko.exe).
+func TestKinokoBananaLands(t *testing.T) {
+	dir := os.Getenv("MKW_KINOKO_DIR")
+	if dir == "" {
+		t.Skip("MKW_KINOKO_DIR not set")
+	}
+	// Shot: owner 0, dropped, at (20336, 8216, -17044), moving (-2, 7, 8).
+	data := []byte{0, 0, 0xc0, 0, 0, 0, 0, 0, 0x13, 0xdc, 0x08, 0x06, 0xef, 0x5b, 1, 0xf9, 0xfc, 0xff, 7, 4}
+	points, end, err := runKinokoItems(dir, 28, data, common.ObjBanana)
+	if err != nil || end != "landed" {
+		t.Fatalf("end %q, err %v", end, err)
+	}
+	p := points[len(points)-1]
+	t.Logf("landed after %d frames at (%.0f, %.0f, %.0f)", len(points), p.pos[0], p.pos[1], p.pos[2])
+	if items.Distance(p.pos, [3]float32{20336, 8216, -17044}) > 600 {
+		t.Fatal("a drop landed far from where it was dropped")
 	}
 }

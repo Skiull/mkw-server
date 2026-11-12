@@ -20,6 +20,12 @@ import (
 // air (ramps, trick snipes), aren't tracked.
 // A player who drives through one must get hit, so a no-hit code shows up even though its
 // game never reports the collision.
+//
+// With Kinoko (the AI bot folder), every throw is also simulated with the game's own Banana /
+// Fake Item Box movement (kinoko/docs/thrown-items.md): it flies until its first floor contact
+// and stays there. The simulated spot replaces the fitted one. Throws the fit can't place
+// (from the air, far, off a wall, near an edge) are tracked from the simulation alone, log
+// only until the logs show how often it's right.
 
 const (
 	groundItemRadius    = 60  // Kart center to item, in course units.
@@ -57,6 +63,8 @@ type groundItem struct {
 	dropped bool
 	// Only checked against the player's own hit reports (position not precise enough).
 	reportOnly bool
+	// Placed by the simulation only: a drive-through is logged, never kicked.
+	logOnly bool
 	// The throw's EVENT slot, and the aids the owner's packets told about it (relayed.go).
 	slot   int
 	raw    byte
@@ -71,18 +79,105 @@ func (g *groundItem) ownerGrace(a *Aid, now time.Time) bool {
 }
 
 // Guarded by mu.
-var groundItems []*groundItem
+var (
+	groundItems []*groundItem
+	groundRace  int // Bumped on every reset, so late simulations from a past race are dropped.
+)
 
 // trackShot starts tracking a dropped Banana or Fake Item Box. Caller must hold mu.
-func trackShot(a *Aid, s *records.Shot, slot int, raw byte, now time.Time) {
+// data is the Shot slot's 20 bytes (nil if not available).
+func trackShot(a *Aid, s *records.Shot, data []byte, slot int, raw byte, now time.Time) {
 	if s.Object != common.ObjBanana && s.Object != common.ObjFakeItemBox {
 		return
 	}
 	n := len(groundItems)
-	trackShotLanding(a, s, slot, raw, now)
-	if len(groundItems) == n || (n == maxGroundItems && groundItems[len(groundItems)-1].at != now) {
+	why := trackShotLanding(a, s, slot, raw, now)
+	var fitted *groundItem
+	if why == "" && len(groundItems) > 0 && (len(groundItems) > n || groundItems[len(groundItems)-1].at == now) {
+		fitted = groundItems[len(groundItems)-1]
+	}
+	if room.config.AIBotDir != "" && len(data) >= 20 {
+		simulateGroundItem(a, s, data[:20], slot, raw, now, fitted, why)
+		return
+	}
+	if why != "" {
+		logging.Log("Aid %d's %v not tracked: %s", a.aid, s.Object, why)
 		untrackedThrow(a, s)
 	}
+}
+
+// simulateGroundItem runs the throw in Kinoko and tracks the item where it lands. fitted is
+// the item already tracked from the fit (nil if the fit couldn't place it, for reason why).
+// Caller must hold mu.
+func simulateGroundItem(a *Aid, s *records.Shot, data []byte, slot int, raw byte, now time.Time, fitted *groundItem, why string) {
+	dir, course, race := room.config.AIBotDir, a.course, groundRace
+	shot := *s
+	go func() {
+		points, end, err := runKinokoItems(dir, course, data, shot.Object)
+		mu.Lock()
+		defer mu.Unlock()
+		if race != groundRace {
+			return
+		}
+		if err != nil || end != "landed" {
+			if err == nil {
+				err = fmt.Errorf("ends %s", end)
+			}
+			logging.Log("Aid %d %v simulation: %v", a.aid, shot.Object, err)
+			if fitted == nil {
+				logging.Log("Aid %d's %v not tracked: %s", a.aid, shot.Object, why)
+				untrackedThrow(a, &shot)
+			}
+			return
+		}
+		last := points[len(points)-1]
+		// The simulation gives the item's center; tracked positions are at rest height.
+		pos := last.pos
+		pos[1] += itemRestHeight - last.radius
+		if fitted != nil {
+			for _, g := range groundItems {
+				if g == fitted {
+					logging.Log("Aid %d's %v lands at (%.0f, %.0f, %.0f) after %d frames, %.0f from the fit",
+						a.aid, shot.Object, pos[0], pos[1], pos[2], len(points), items.Distance(pos, g.pos))
+					g.pos = pos
+					return
+				}
+			}
+			return // Already hit or gone.
+		}
+		c := room.config.Courses[course]
+		if c == nil || c.Floors == nil {
+			return
+		}
+		if unstable := restUnstable(c, pos); unstable != "" {
+			logging.Log("Aid %d's %v not tracked: lands %s", a.aid, shot.Object, unstable)
+			untrackedThrow(a, &shot)
+			return
+		}
+		if len(groundItems) >= maxGroundItems {
+			groundItems = groundItems[1:]
+		}
+		groundItems = append(groundItems, &groundItem{obj: shot.Object, pos: pos, owner: a, at: now, slot: slot, raw: raw,
+			reportOnly: shot.Object == common.ObjFakeItemBox, logOnly: true,
+			dropped: items.Distance([3]float32{pos[0], 0, pos[2]}, [3]float32{shot.Pos[0], 0, shot.Pos[2]}) < droppedDistance})
+		logging.Log("Aid %d's %v lands at (%.0f, %.0f, %.0f) after %d frames (simulation only: log only)",
+			a.aid, shot.Object, pos[0], pos[1], pos[2], len(points))
+	}()
+}
+
+// restUnstable says why an item resting at pos may not stay there ("" if it will).
+func restUnstable(c *items.Course, pos [3]float32) string {
+	floor := [3]float32{pos[0], pos[1] - itemRestHeight, pos[2]}
+	if c.NearHazard(pos) {
+		return "near a hazard" // A geyser, firebar, Thwomp, car... may destroy it unseen.
+	}
+	if ty, ok := c.Floors.At(floor); !ok || !items.ItemsStayPut(ty) {
+		return "on a floor where items move" // Ice, water, conveyors.
+	}
+	if c.NearBelt(floor) {
+		return "near a conveyor"
+	}
+	return ""
 }
 
 // untrackedThrow handles a Banana or Fake Item Box thrown where its landing can't be
@@ -100,19 +195,19 @@ func untrackedThrow(a *Aid, s *records.Shot) {
 }
 
 // trackShotLanding predicts where a throw lands and tracks it there, if it can.
-func trackShotLanding(a *Aid, s *records.Shot, slot int, raw byte, now time.Time) {
+func trackShotLanding(a *Aid, s *records.Shot, slot int, raw byte, now time.Time) (skipped string) {
 	// The velocity bytes top out at 127 (x and z are packed halved): a faster throw's real
 	// speed isn't known.
 	if v := s.Vel; abs32(v[1]) >= 127 || abs32(v[0]) >= 254 || abs32(v[2]) >= 254 {
-		return
+		return "too fast for the record"
 	}
 	c := room.config.Courses[a.course]
 	if c == nil || c.Floors == nil {
-		return
+		return "no course floors"
 	}
 	// Thrown from the air (off a ramp, trick snipes): the arc isn't predictable enough.
 	if h, ok := c.Floors.Height(s.Pos[0], s.Pos[1], s.Pos[2], 2000); !ok || s.Pos[1]-h > maxThrowHeight {
-		return
+		return "thrown from the air"
 	}
 	g, reportOnly := float32(bananaGravity), false
 	if s.Object == common.ObjFakeItemBox {
@@ -124,28 +219,23 @@ func trackShotLanding(a *Aid, s *records.Shot, slot int, raw byte, now time.Time
 	}
 	pos, ok := c.ThrowLanding(s.Pos, s.Vel, g, itemRestHeight)
 	if !ok {
-		return // Off the course, or it hits a wall on the way and bounces.
+		return "landing not found (off the course or a wall)" // Off the course, or it hits a wall on the way and bounces.
 	}
 	if items.Distance([3]float32{pos[0], 0, pos[2]}, [3]float32{s.Pos[0], 0, s.Pos[2]}) > maxThrowDistance {
-		return // Thrown far: the longer the arc, the less sure where it ends up.
+		return "landing too far" // Thrown far: the longer the arc, the less sure where it ends up.
 	}
-	if c.NearHazard(pos) {
-		return // A geyser, firebar, Thwomp, car... may destroy it unseen.
-	}
-	if ty, ok := c.Floors.At([3]float32{pos[0], pos[1] - itemRestHeight, pos[2]}); !ok || !items.ItemsStayPut(ty) {
-		return // Ice, water, conveyors: it won't stay there.
-	}
-	if c.NearBelt([3]float32{pos[0], pos[1] - itemRestHeight, pos[2]}) {
-		return // Maybe on a conveyor belt.
+	if unstable := restUnstable(c, pos); unstable != "" {
+		return unstable
 	}
 	if c.Floors.NearEdge([3]float32{pos[0], pos[1] - itemRestHeight, pos[2]}, edgeMargin) {
-		return // At the edge of a drop: it may fall off.
+		return "at an edge" // At the edge of a drop: it may fall off.
 	}
 	if len(groundItems) >= maxGroundItems {
 		groundItems = groundItems[1:]
 	}
 	groundItems = append(groundItems, &groundItem{obj: s.Object, pos: pos, owner: a, at: now, reportOnly: reportOnly, slot: slot, raw: raw,
 		dropped: items.Distance([3]float32{pos[0], 0, pos[2]}, [3]float32{s.Pos[0], 0, s.Pos[2]}) < droppedDistance})
+	return ""
 }
 
 // removeHitItem handles a player reporting they hit an item (EVENT HIT-FREE). The nearest
@@ -231,6 +321,7 @@ func checkGroundItems(a *Aid, p *Player, prev, pos [3]float32, now time.Time) {
 		if !p.invincible(now) {
 			e := expectHit(a, p, fmt.Sprintf("drove through a %v dropped by aid %d", g.obj, g.owner.aid), now, ramDeadline, false)
 			e.item = g
+			e.logOnly = g.logOnly
 			logging.Log("Aid %d player %d drove through a %v at (%.0f, %.0f, %.0f)", a.aid, playerIndex(a, p), g.obj, g.pos[0], g.pos[1], g.pos[2])
 		}
 	}
@@ -251,6 +342,7 @@ func pointSegmentDistance(p, a, b [3]float32) float32 {
 // resetGroundItems forgets all items (new race). Caller must hold mu.
 func resetGroundItems() {
 	groundItems = nil
+	groundRace++
 }
 
 func (g *groundItem) radius() float32 {

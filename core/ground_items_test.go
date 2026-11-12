@@ -223,7 +223,7 @@ func TestUntrackedNearHazardsAndLongThrows(t *testing.T) {
 // trackShotSeen tracks a throw that the thrower's packets told every player about.
 func trackShotSeen(a *Aid, s *records.Shot, now time.Time) {
 	n := len(groundItems)
-	trackShot(a, s, 0, 0, now)
+	trackShot(a, s, nil, 0, 0, now)
 	if len(groundItems) > n || (n == maxGroundItems && len(groundItems) == n) {
 		groundItems[len(groundItems)-1].seenBy = 0x7fff
 	}

@@ -36,6 +36,7 @@ const (
 
 type shellPoint struct {
 	pos       [3]float32
+	radius    float32 // Against the course.
 	hitRadius float32
 }
 
@@ -64,7 +65,7 @@ func simulateShell(a *Aid, s *records.Shot, data []byte, now time.Time) {
 	}
 	course := a.course
 	go func() {
-		points, end, err := runKinokoItems(dir, course, data[:20])
+		points, end, err := runKinokoItems(dir, course, data[:20], common.ObjGreenShell)
 		if err != nil {
 			logging.Log("Aid %d Green Shell simulation failed: %v", a.aid, err)
 			return
@@ -81,13 +82,13 @@ func simulateShell(a *Aid, s *records.Shot, data []byte, now time.Time) {
 	}()
 }
 
-func runKinokoItems(dir string, course common.Course, data []byte) ([]shellPoint, string, error) {
+func runKinokoItems(dir string, course common.Course, data []byte, obj common.ItemObject) ([]shellPoint, string, error) {
 	in, err := os.CreateTemp("", "shot-*.txt")
 	if err != nil {
 		return nil, "", err
 	}
 	defer os.Remove(in.Name())
-	fmt.Fprintf(in, "s %s\n", hex.EncodeToString(data))
+	fmt.Fprintf(in, "s %s %d\n", hex.EncodeToString(data), obj)
 	in.Close()
 	outPath := in.Name() + ".out"
 	defer os.Remove(outPath)
@@ -139,7 +140,7 @@ func parseKinokoItems(sc *bufio.Scanner) ([]shellPoint, string, error) {
 			}
 			v[i] = x
 		}
-		points = append(points, shellPoint{pos: [3]float32{float32(v[0]), float32(v[1]), float32(v[2])}, hitRadius: float32(v[4])})
+		points = append(points, shellPoint{pos: [3]float32{float32(v[0]), float32(v[1]), float32(v[2])}, radius: float32(v[3]), hitRadius: float32(v[4])})
 	}
 	if len(points) == 0 {
 		return nil, "", fmt.Errorf("no frames (end %q)", end)

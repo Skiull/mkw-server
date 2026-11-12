@@ -259,8 +259,9 @@ func observeItems(a *Aid, pkt *RacePacket, now time.Time) error {
 				// Temporary: throws and hits with positions, to work out item gravity.
 				logging.Log("Aid %d threw %v from (%.0f, %.0f, %.0f) at (%.0f, %.0f, %.0f) u/f", a.aid, shot.Object,
 					shot.Pos[0], shot.Pos[1], shot.Pos[2], shot.Vel[0], shot.Vel[1], shot.Vel[2])
-				trackShot(a, shot, i, pkt.Event.RawSlots[i], now)
-				if d, ok := pkt.Event.SlotData(i); ok {
+				d, _ := pkt.Event.SlotData(i)
+				trackShot(a, shot, d, i, pkt.Event.RawSlots[i], now)
+				if d != nil {
 					simulateShell(a, shot, d, now)
 				}
 			}
