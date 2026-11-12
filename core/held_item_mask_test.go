@@ -40,3 +40,12 @@ func TestMaskHeldItems(t *testing.T) {
 		}
 	}
 }
+
+func TestIsDisconnectReport(t *testing.T) {
+	if !isDisconnectReport([]byte{'D', 'S', 3, 0, 0, 0, 0, 0, 0x80, 0x65, 0x43, 0x21}) {
+		t.Error("DS report not recognized")
+	}
+	if isDisconnectReport([]byte{'D', 'X', 3, 0, 0, 0, 0, 0, 0, 0, 0, 0}) || isDisconnectReport([]byte{'D', 'C'}) {
+		t.Error("bad report recognized")
+	}
+}

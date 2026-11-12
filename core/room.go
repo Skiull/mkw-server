@@ -211,6 +211,9 @@ func handlePacket(addr net.Addr, data []byte, now time.Time) []net.Addr {
 	case isChallengeReply(data):
 		handleChallengeReply(a, data)
 		return nil
+	case isDisconnectReport(data):
+		handleDisconnectReport(a, data)
+		return nil
 	case isDataChangesPacket(data):
 		handleDataChanges(a, data, now)
 		return nil
