@@ -36,8 +36,9 @@ const (
 	// After the game reports a hit, speed must drop within this long.
 	hitSlowWait  = 1500 * time.Millisecond
 	hitKeptSpeed = 0.8
-	// KartActions that don't always slow the kart: 8 Cataquack launch.
-	hitActionsNoSlow = 1 << 8
+	// KartActions that don't always slow the kart: 8 Cataquack launch, 11 POW (set even when
+	// the POW is dodged with a jump; 11-12: two players kicked for one dodged POW).
+	hitActionsNoSlow = 1<<8 | 1<<11
 )
 
 type hitExpectation struct {
