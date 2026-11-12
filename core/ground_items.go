@@ -26,6 +26,12 @@ import (
 // and stays there. The simulated spot replaces the fitted one. Throws the fit can't place
 // (from the air, far, off a wall, near an edge) are tracked from the simulation alone, log
 // only until the logs show how often it's right.
+//
+// Bob-ombs (simulation only, log only): they bounce, then sit on their fuse (at most 120-180
+// frames). A kart other than the thrower's within 1044 units (36 x their 29-unit hit radius)
+// sets it off within 4 frames, and the blast grows to about that size: a player driving close
+// to a sitting Bob-omb is expected to get hit. Tracked Bananas and boxes in its blast become
+// report-only (it may have destroyed them).
 
 const (
 	groundItemRadius    = 60  // Kart center to item, in course units.
@@ -51,6 +57,12 @@ const (
 	hitReportSlack    = 400  // Position lag between touching an item and the report (a few frames at ~90 u/f).
 	droppedDistance   = 600  // Landing this close to the spawn point counts as a drop.
 	maxThrowDistance  = 12000 // Items landing further from where they were thrown aren't tracked (forward tosses land ~9000 ahead).
+	// Bob-ombs: closer than this to a sitting one, a kart sets it off and is caught in the
+	// blast (trigger 1044; kept well inside it so a kart leaving the blast isn't expected).
+	bombTriggerRadius = 700
+	bombBlastRadius   = 1100
+	bombFuse          = 3*time.Second + 500*time.Millisecond // Longest fuse (180 frames) and the blast.
+	frameTime         = time.Second / 60
 )
 
 type groundItem struct {
@@ -65,6 +77,8 @@ type groundItem struct {
 	reportOnly bool
 	// Placed by the simulation only: a drive-through is logged, never kicked.
 	logOnly bool
+	// Bob-omb: sitting on its fuse between these times.
+	armedAt, until time.Time
 	// The throw's EVENT slot, and the aids the owner's packets told about it (relayed.go).
 	slot   int
 	raw    byte
@@ -87,6 +101,12 @@ var (
 // trackShot starts tracking a dropped Banana or Fake Item Box. Caller must hold mu.
 // data is the Shot slot's 20 bytes (nil if not available).
 func trackShot(a *Aid, s *records.Shot, data []byte, slot int, raw byte, now time.Time) {
+	if s.Object == common.ObjBobOmb {
+		if room.config.AIBotDir != "" && len(data) >= 20 {
+			simulateGroundItem(a, s, data, slot, raw, now, nil, "Bob-omb not simulated")
+		}
+		return
+	}
 	if s.Object != common.ObjBanana && s.Object != common.ObjFakeItemBox {
 		return
 	}
@@ -97,7 +117,7 @@ func trackShot(a *Aid, s *records.Shot, data []byte, slot int, raw byte, now tim
 		fitted = groundItems[len(groundItems)-1]
 	}
 	if room.config.AIBotDir != "" && len(data) >= 20 {
-		simulateGroundItem(a, s, data[:20], slot, raw, now, fitted, why)
+		simulateGroundItem(a, s, data, slot, raw, now, fitted, why)
 		return
 	}
 	if why != "" {
@@ -124,7 +144,7 @@ func simulateGroundItem(a *Aid, s *records.Shot, data []byte, slot int, raw byte
 				err = fmt.Errorf("ends %s", end)
 			}
 			logging.Log("Aid %d %v simulation: %v", a.aid, shot.Object, err)
-			if fitted == nil {
+			if fitted == nil && shot.Object != common.ObjBobOmb {
 				logging.Log("Aid %d's %v not tracked: %s", a.aid, shot.Object, why)
 				untrackedThrow(a, &shot)
 			}
@@ -149,20 +169,40 @@ func simulateGroundItem(a *Aid, s *records.Shot, data []byte, slot int, raw byte
 		if c == nil || c.Floors == nil {
 			return
 		}
+		if shot.Object == common.ObjBobOmb {
+			bombLanded(a, pos)
+		}
 		if unstable := restUnstable(c, pos); unstable != "" {
 			logging.Log("Aid %d's %v not tracked: lands %s", a.aid, shot.Object, unstable)
-			untrackedThrow(a, &shot)
+			if shot.Object != common.ObjBobOmb {
+				untrackedThrow(a, &shot)
+			}
 			return
 		}
 		if len(groundItems) >= maxGroundItems {
 			groundItems = groundItems[1:]
 		}
-		groundItems = append(groundItems, &groundItem{obj: shot.Object, pos: pos, owner: a, at: now, slot: slot, raw: raw,
+		g := &groundItem{obj: shot.Object, pos: pos, owner: a, at: now, slot: slot, raw: raw,
 			reportOnly: shot.Object == common.ObjFakeItemBox, logOnly: true,
-			dropped: items.Distance([3]float32{pos[0], 0, pos[2]}, [3]float32{shot.Pos[0], 0, shot.Pos[2]}) < droppedDistance})
+			dropped: items.Distance([3]float32{pos[0], 0, pos[2]}, [3]float32{shot.Pos[0], 0, shot.Pos[2]}) < droppedDistance}
+		if shot.Object == common.ObjBobOmb {
+			g.armedAt = now.Add(time.Duration(len(points)) * frameTime)
+			g.until = g.armedAt.Add(bombFuse)
+		}
+		groundItems = append(groundItems, g)
 		logging.Log("Aid %d's %v lands at (%.0f, %.0f, %.0f) after %d frames (simulation only: log only)",
 			a.aid, shot.Object, pos[0], pos[1], pos[2], len(points))
 	}()
+}
+
+// bombLanded makes tracked items in a Bob-omb's blast report-only. Caller must hold mu.
+func bombLanded(a *Aid, pos [3]float32) {
+	for _, g := range groundItems {
+		if g.obj != common.ObjBobOmb && !g.reportOnly && items.Distance(g.pos, pos) < bombBlastRadius {
+			g.reportOnly = true
+			logging.Log("Aid %d's Bob-omb lands by aid %d's %v: report-only now", a.aid, g.owner.aid, g.obj)
+		}
+	}
 }
 
 // restUnstable says why an item resting at pos may not stay there ("" if it will).
@@ -308,7 +348,12 @@ func checkGroundItems(a *Aid, p *Player, prev, pos [3]float32, now time.Time) {
 	}
 	kept := groundItems[:0]
 	for _, g := range groundItems {
-		if now.Sub(g.at) > groundItemLifetime {
+		if now.Sub(g.at) > groundItemLifetime || (!g.until.IsZero() && now.After(g.until)) {
+			continue
+		}
+		bomb := g.obj == common.ObjBobOmb
+		if bomb && (g.owner == a || now.Before(g.armedAt)) {
+			kept = append(kept, g) // The thrower doesn't set it off; still in flight.
 			continue
 		}
 		hit := !g.reportOnly && !g.ownerGrace(a, now) && g.sentTo(a, now) &&
@@ -319,7 +364,11 @@ func checkGroundItems(a *Aid, p *Player, prev, pos [3]float32, now time.Time) {
 			continue
 		}
 		if !p.invincible(now) {
-			e := expectHit(a, p, fmt.Sprintf("drove through a %v dropped by aid %d", g.obj, g.owner.aid), now, ramDeadline, false)
+			what := "drove through"
+			if bomb {
+				what = "drove up to"
+			}
+			e := expectHit(a, p, fmt.Sprintf("%s a %v dropped by aid %d", what, g.obj, g.owner.aid), now, ramDeadline, false)
 			e.item = g
 			e.logOnly = g.logOnly
 			logging.Log("Aid %d player %d drove through a %v at (%.0f, %.0f, %.0f)", a.aid, playerIndex(a, p), g.obj, g.pos[0], g.pos[1], g.pos[2])
@@ -346,8 +395,11 @@ func resetGroundItems() {
 }
 
 func (g *groundItem) radius() float32 {
-	if g.obj == common.ObjFakeItemBox {
+	switch g.obj {
+	case common.ObjFakeItemBox:
 		return fakeBoxRadius
+	case common.ObjBobOmb:
+		return bombTriggerRadius
 	}
 	return groundItemRadius
 }

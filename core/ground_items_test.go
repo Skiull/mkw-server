@@ -278,3 +278,25 @@ func TestUntrackedThrowMakesNearbyReportOnly(t *testing.T) {
 		t.Fatal("nearby tracked item still checked on drive-throughs")
 	}
 }
+
+// A sitting Bob-omb: someone driving up to it is expected to get hit (log only); its thrower
+// and anyone before it lands or after its fuse aren't.
+func TestBobOmbDriveUpExpectsHit(t *testing.T) {
+	setupRoom(t, flatCourse())
+	owner := addTestAid(t, 0, false)
+	driver := addTestAid(t, 1, false)
+	now := time.Now()
+	g := &groundItem{obj: common.ObjBobOmb, pos: [3]float32{0, 0, 0}, owner: owner, at: now, logOnly: true,
+		armedAt: now.Add(time.Second), until: now.Add(4 * time.Second), seenBy: 0x7fff}
+	groundItems = []*groundItem{g}
+
+	checkGroundItems(driver, driver.players[0], [3]float32{-600, 0, 400}, [3]float32{600, 0, 400}, now) // In flight.
+	checkGroundItems(owner, owner.players[0], [3]float32{-600, 0, 400}, [3]float32{600, 0, 400}, now.Add(2*time.Second))
+	if len(hitExpectations) != 0 {
+		t.Fatal("expected a hit before it landed or on its thrower")
+	}
+	checkGroundItems(driver, driver.players[0], [3]float32{-600, 0, 400}, [3]float32{600, 0, 400}, now.Add(2*time.Second))
+	if len(hitExpectations) != 1 || !hitExpectations[0].logOnly {
+		t.Fatalf("%d expectations, want 1 log-only", len(hitExpectations))
+	}
+}

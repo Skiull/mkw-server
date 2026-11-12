@@ -102,3 +102,19 @@ func TestKinokoBananaLands(t *testing.T) {
 		t.Fatal("a drop landed far from where it was dropped")
 	}
 }
+
+// The same drop as a Bob-omb (21 bytes): bounces, then lands near where it was dropped.
+func TestKinokoBobOmbLands(t *testing.T) {
+	dir := os.Getenv("MKW_KINOKO_DIR")
+	if dir == "" {
+		t.Skip("MKW_KINOKO_DIR not set")
+	}
+	data := []byte{0, 0, 0xc0, 0, 0, 0, 0, 0, 0x13, 0xdc, 0x08, 0x06, 0xef, 0x5b, 1, 0xf9, 0xfc, 0xff, 7, 4, 0}
+	points, end, err := runKinokoItems(dir, 28, data, common.ObjBobOmb)
+	if err != nil || end != "landed" {
+		t.Fatalf("end %q, err %v", end, err)
+	}
+	if p := points[len(points)-1]; items.Distance(p.pos, [3]float32{20336, 8216, -17044}) > 800 {
+		t.Fatalf("landed at %v", p.pos)
+	}
+}
