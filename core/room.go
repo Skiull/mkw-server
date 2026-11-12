@@ -28,6 +28,9 @@ type Config struct {
 	EnforceItems bool
 	// Kick right away (as cheating) anyone holding or using an item the server never granted.
 	KickItemCheats bool
+	// Blank each player's held item in the ITEM records relayed to other players, so item spy
+	// can't read it before it's used (see held_item_mask.go).
+	HideHeldItems bool
 	// Kick right away (as cheating) anyone respawning away from the course's respawn point.
 	KickRespawnCheats bool
 
@@ -259,6 +262,9 @@ func handlePacket(addr net.Addr, data []byte, now time.Time) []net.Addr {
 		checkFinish(a, pkt, now)
 	}
 	trackMovement(a, pkt, now)
+	if room.config.HideHeldItems {
+		maskHeldItems(data, pkt)
+	}
 	recordMirrorSource(a, data, pkt, now)
 	recordPackets(a, now)
 

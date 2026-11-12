@@ -26,6 +26,8 @@ type RacePacket struct {
 
 	SenderAid    byte
 	Destinations uint16
+
+	itemOffset int // Byte offset of the ITEM records in the packet, when Items is set.
 }
 
 // parseRacePacket parses and validates every record in a Race packet. Records are laid out
@@ -120,6 +122,7 @@ func parseRacePacket(data []byte, ctx *records.Context) (*RacePacket, error) {
 	}
 
 	if n := header.ItemLen(); n != 0 {
+		p.itemOffset = offset
 		p.Items, err = records.ParseItemRecords(next(n), ctx)
 		if err != nil {
 			return nil, fmt.Errorf("Item parsing failure: %w", err)
