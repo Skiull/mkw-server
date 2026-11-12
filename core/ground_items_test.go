@@ -53,7 +53,7 @@ func TestHitReportRemovesItem(t *testing.T) {
 	trackShotSeen(owner, &records.Shot{Object: common.ObjFakeItemBox, Pos: [3]float32{1000, 0, 0}}, time.Now())
 	// Reported from 650 away: the reporter's own item hit it. Removed, no hit expected.
 	other.players[0].lastPos = [3]float32{1650, 0, 0}
-	removeHitItem(other, common.ObjFakeItemBox, time.Now())
+	removeHitItem(other, common.ObjFakeItemBox, 0, time.Now())
 	if len(groundItems) != 0 || len(hitExpectations) != 0 {
 		t.Fatalf("%d items, %d expectations, want 0 and 0", len(groundItems), len(hitExpectations))
 	}
@@ -67,7 +67,7 @@ func TestDrivingIntoVanishingItemExpectsHit(t *testing.T) {
 	trackShotSeen(owner, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{1000, 0, 0}}, now)
 	other.players[0].lastPos = [3]float32{1050, 0, 0}
 	other.players[0].move.lastSpeed = 90
-	removeHitItem(other, common.ObjBanana, now)
+	removeHitItem(other, common.ObjBanana, 0, now)
 	if len(groundItems) != 0 || len(hitExpectations) != 1 {
 		t.Fatalf("%d items, %d expectations, want 0 and 1", len(groundItems), len(hitExpectations))
 	}
@@ -149,7 +149,7 @@ func TestThrownFakeItemBoxOnlyChecksReports(t *testing.T) {
 		t.Fatal("driving past a thrown Fake Item Box expected a hit")
 	}
 	other.players[0].lastPos = [3]float32{g[0] + 300, 0, g[2]}
-	removeHitItem(other, common.ObjFakeItemBox, later)
+	removeHitItem(other, common.ObjFakeItemBox, 0, later)
 	if len(hitExpectations) != 1 {
 		t.Fatal("report of hitting a thrown Fake Item Box not checked")
 	}
@@ -166,7 +166,7 @@ func TestOwnShellDestroyedBanana(t *testing.T) {
 		later := now.Add(3 * time.Second)
 		report := func() {
 			a.players[0].lastPos = [3]float32{0, 0, -860} // The kart, well behind the Banana.
-			removeHitItem(a, common.ObjBanana, later)
+			removeHitItem(a, common.ObjBanana, 0, later)
 		}
 		if reportFirst {
 			report()
@@ -192,7 +192,7 @@ func TestOwnFreshThrowHitIsRemoved(t *testing.T) {
 		t.Fatalf("%d tracked", len(groundItems))
 	}
 	a.players[0].lastPos = [3]float32{0, 0, -9000} // Nowhere near the predicted landing.
-	removeHitItem(a, common.ObjBanana, now.Add(time.Second))
+	removeHitItem(a, common.ObjBanana, 0, now.Add(time.Second))
 	if len(groundItems) != 0 {
 		t.Fatal("fresh own Banana still tracked after a hit on it")
 	}
@@ -259,7 +259,7 @@ func TestShellHitCancelsDriveThrough(t *testing.T) {
 	e := expectHit(driver, p, "drove through a Banana", now, ramDeadline, false)
 	e.item = g
 	owner.players[0].lastPos = [3]float32{2993, 9854, -38950}
-	removeHitItem(owner, common.ObjGreenShell, now.Add(time.Second))
+	removeHitItem(owner, common.ObjGreenShell, 0, now.Add(time.Second))
 	resolveHits(now.Add(3 * time.Second))
 	if driver.kicked {
 		t.Fatal("kicked for a Banana a shell had destroyed")
@@ -298,5 +298,23 @@ func TestBobOmbDriveUpExpectsHit(t *testing.T) {
 	checkGroundItems(driver, driver.players[0], [3]float32{-600, 0, 400}, [3]float32{600, 0, 400}, now.Add(2*time.Second))
 	if len(hitExpectations) != 1 || !hitExpectations[0].logOnly {
 		t.Fatalf("%d expectations, want 1 log-only", len(hitExpectations))
+	}
+}
+
+// 11-12: a kart with triple Green Shells out drives onto a Banana; a shell takes it and the
+// game reports it destroyed by their item (0xC1), right at the kart. No hit expected.
+func TestCirclingShellDestroysBanana(t *testing.T) {
+	setupRoom(t, flatCourse())
+	owner := addTestAid(t, 0, false)
+	other := addTestAid(t, 1, false)
+	now := time.Now()
+	trackShotSeen(owner, &records.Shot{Object: common.ObjBanana, Pos: [3]float32{1000, 0, 0}}, now)
+	later := now.Add(5 * time.Second)
+	other.players[0].move.lastSpeed = 118
+	checkGroundItems(other, other.players[0], [3]float32{800, 0, 0}, [3]float32{1040, 0, 0}, later)
+	other.players[0].lastPos = [3]float32{1040, 0, 0}
+	removeHitItem(other, common.ObjBanana, records.ItemReportDestroyed, later.Add(50*time.Millisecond))
+	if missed := resolveHits(later.Add(2 * time.Second)); len(missed) != 0 || len(hitExpectations) != 0 {
+		t.Fatalf("%d missed, %d expectations left", len(missed), len(hitExpectations))
 	}
 }

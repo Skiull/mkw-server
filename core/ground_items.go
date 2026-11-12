@@ -282,7 +282,12 @@ func trackShotLanding(a *Aid, s *records.Shot, slot int, raw byte, now time.Time
 // tracked item goes away. If the player was right on it, they drove into it and must get
 // hit: a code that makes touched items vanish still sends this report, but skips the hit.
 // From further away, their own item hit it. Caller must hold mu.
-func removeHitItem(a *Aid, obj common.ItemObject, now time.Time) {
+//
+// code is the report's code: records.ItemReportDestroyed means the player's own item (a shell
+// thrown or circling the kart, a trailing item) destroyed it, wherever the kart is (11-12: a
+// kart with triple Green Shells out drove onto a Banana, a shell took it). ItemReportHit
+// (it hit them) is checked by reportedItemHit. 0: no report data, judged by distance.
+func removeHitItem(a *Aid, obj common.ItemObject, code byte, now time.Time) {
 	if len(a.players) == 0 {
 		return
 	}
@@ -294,7 +299,7 @@ func removeHitItem(a *Aid, obj common.ItemObject, now time.Time) {
 	cancelled := false
 	for _, e := range hitExpectations {
 		if !cancelled && e.item != nil && e.aid == a && e.item.obj == obj && now.Sub(e.at) < ownItemHitWindow &&
-			items.Distance(e.item.pos, p.lastPos) > e.item.radius()+hitReportSlack {
+			(code == records.ItemReportDestroyed || items.Distance(e.item.pos, p.lastPos) > e.item.radius()+hitReportSlack) {
 			cancelled = true
 			logging.Log("Aid %d's own item hit the %v at (%.0f, %.0f, %.0f) before they drove there", a.aid, obj, e.item.pos[0], e.item.pos[1], e.item.pos[2])
 			continue
@@ -334,7 +339,7 @@ func removeHitItem(a *Aid, obj common.ItemObject, now time.Time) {
 	}
 	g := groundItems[best]
 	groundItems = append(groundItems[:best], groundItems[best+1:]...)
-	if bestDist <= g.radius()+hitReportSlack && !p.invincible(now) && !g.ownerGrace(a, now) {
+	if code == 0 && bestDist <= g.radius()+hitReportSlack && !p.invincible(now) && !g.ownerGrace(a, now) {
 		expectHit(a, p, fmt.Sprintf("reported driving into a %v dropped by aid %d", g.obj, g.owner.aid), now, ramDeadline, false)
 	}
 }

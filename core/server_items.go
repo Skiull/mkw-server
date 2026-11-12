@@ -273,7 +273,11 @@ func observeItems(a *Aid, pkt *RacePacket, now time.Time) error {
 		if slot.Action == common.EventHitFree && len(a.players) > 0 {
 			p := a.players[0]
 			logging.Log("Aid %d hit a %v at (%.0f, %.0f, %.0f)", a.aid, slot.Object, p.lastPos[0], p.lastPos[1], p.lastPos[2])
-			removeHitItem(a, slot.Object, now)
+			var code byte
+			if r, ok := pkt.Event.ItemReportAt(i); ok {
+				code = r.Code
+			}
+			removeHitItem(a, slot.Object, code, now)
 		}
 		if !slot.Action.IsOwnItem() {
 			continue
