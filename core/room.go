@@ -33,6 +33,9 @@ type Config struct {
 	HideHeldItems bool
 	// Kick right away (as cheating) anyone respawning away from the course's respawn point.
 	KickRespawnCheats bool
+	// Kick right away (as cheating) anyone tricking where there's nothing trickable
+	// (trickKickCount flagged tricks within trickKickWindow).
+	KickTrickCheats bool
 
 	// Known-good game hashes (see game_hash.go). Nil only logs the hashes clients send.
 	GameHashes map[uint64]bool

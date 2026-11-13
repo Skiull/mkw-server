@@ -45,6 +45,8 @@ type Player struct {
 	positions []timedPos
 	// When this player last drove through a leaf pile, which can drop an item.
 	leafPileAt time.Time
+	// When this player's recent tricks were flagged as trick-anywhere (trick_check.go).
+	trickFlags []time.Time
 	leafPile   int // Index of that pile in the course's LeafPiles.
 	// When this player last used a Mega Mushroom.
 	megaAt time.Time

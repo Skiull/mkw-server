@@ -310,6 +310,11 @@ func trackMovement(a *Aid, pkt *RacePacket, now time.Time) {
 			p.move.trickNote = ""
 			logging.Log("Aid %d player %d possible trick-anywhere: %s", a.aid, i, note)
 			recordFlag(a, "possible trick-anywhere: "+note, now)
+			if trickCheat(p, now) && room.config.KickTrickCheats && a.bot == nil {
+				logging.Log("Aid %d player %d trick-anywhere cheat: %d flagged tricks in %v", a.aid, i, trickKickCount, trickKickWindow)
+				kick(a, KickCheating)
+				return
+			}
 		}
 		recordPos(a, i, p, rd, now)
 		trackShrinkSpeed(a, p, now)

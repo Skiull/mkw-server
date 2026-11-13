@@ -45,6 +45,7 @@ func main() {
 	itemSlotPath := flag.String("item-slot", "", "Path to ItemSlot.bin. Enables server-side item decisions")
 	hideHeldItems := flag.Bool("hide-held-items", false, "Blank players' held items in the ITEM records sent to other players until used (stops item spy)")
 	kickItemCheats := flag.Bool("kick-item-cheats", false, "Kick (as cheating) anyone holding or using an item the server never granted (requires --item-slot)")
+	kickTrickCheats := flag.Bool("kick-trick-cheats", false, "Kick (as cheating) anyone tricking off non-trickable surfaces (trick anywhere; requires --course-dir and --check-movement)")
 	kickRespawnCheats := flag.Bool("kick-respawn-cheats", false, "Kick (as cheating) anyone who respawns away from the course's respawn point (requires --course-dir and --check-movement)")
 	gameHashes := flag.String("game-hashes", "", "Comma-separated known-good game hashes (hex, as logged). Clients sending other hashes are logged")
 	mutableDataBlocks := flag.String("mutable-data-blocks", "", "Comma-separated StaticR.rel .data block numbers (1 KiB each) that change in normal play, as logged")
@@ -108,6 +109,7 @@ func main() {
 		KickItemCheats:    *kickItemCheats,
 		HideHeldItems:     *hideHeldItems,
 		KickRespawnCheats: *kickRespawnCheats,
+		KickTrickCheats:   *kickTrickCheats,
 
 		CheckMovement:   *checkMovement || *enforceMovement,
 		EnforceMovement: *enforceMovement,

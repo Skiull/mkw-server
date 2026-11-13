@@ -2,6 +2,7 @@ package core
 
 import (
 	"testing"
+	"time"
 
 	"mkw-server/common"
 	"mkw-server/core/records"
@@ -47,5 +48,19 @@ func TestIsDisconnectReport(t *testing.T) {
 	}
 	if isDisconnectReport([]byte{'D', 'X', 3, 0, 0, 0, 0, 0, 0, 0, 0, 0}) || isDisconnectReport([]byte{'D', 'C'}) {
 		t.Error("bad report recognized")
+	}
+}
+
+func TestTrickCheatNeedsSeveralFlags(t *testing.T) {
+	p := &Player{}
+	now := time.Now()
+	if trickCheat(p, now) || trickCheat(p, now.Add(time.Second)) {
+		t.Fatal("kicked before trickKickCount flags")
+	}
+	if trickCheat(p, now.Add(time.Minute)) {
+		t.Fatal("old flags should have expired")
+	}
+	if trickCheat(p, now.Add(time.Minute+time.Second)) || !trickCheat(p, now.Add(time.Minute+2*time.Second)) {
+		t.Fatal("three flags within the window should count")
 	}
 }
