@@ -66,12 +66,13 @@ func parseKCL(kcl []byte) (*Walls, *Floors, error) {
 	}
 
 	w := &Walls{cells: make(map[[2]int32][]int32)}
-	f := &Floors{Walls: Walls{cells: make(map[[2]int32][]int32)}}
+	f := &Floors{Walls: Walls{cells: make(map[[2]int32][]int32)}, Trick: &Walls{cells: make(map[[2]int32][]int32)}}
 	for p := prismOff; p+0x10 <= end; p += 0x10 {
 		e := kcl[p:]
 		flag := binary.BigEndian.Uint16(e[0xe:])
 		isWall := playerWallTypes[flag&0x1f]
-		if !isWall && !floorTypes[flag&0x1f] {
+		isTrick := isTrickable(flag)
+		if !isWall && !floorTypes[flag&0x1f] && !isTrick {
 			continue
 		}
 		height := f32(e)
@@ -100,11 +101,14 @@ func parseKCL(kcl []byte) (*Walls, *Floors, error) {
 		v2 := add3(pos, scale3(crossB, height/db))
 		v3 := add3(pos, scale3(crossA, height/da))
 		tri := [3][3]float32{pos, v2, v3}
+		if isTrick {
+			f.Trick.add(tri)
+		}
 		if isWall {
 			w.add(tri)
 			w.Flags = append(w.Flags, flag)
 			w.Norms = append(w.Norms, fn)
-		} else {
+		} else if floorTypes[flag&0x1f] {
 			f.add(tri)
 			f.Types = append(f.Types, uint8(flag&0x1f))
 		}

@@ -5,6 +5,8 @@ package items
 type Floors struct {
 	Walls         // Triangles and grid (same layout as walls).
 	Types []uint8 // KCL base type of each triangle.
+	// Surfaces a trick can be done off (trick.go). Nil grid until a KCL is parsed.
+	Trick *Walls
 }
 
 // KCL floor types (flag & 0x1f), https://mkwiiki.org/wiki/KCL_flag.

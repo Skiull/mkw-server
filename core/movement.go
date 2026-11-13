@@ -100,6 +100,7 @@ type moveState struct {
 	boostUntil                            uint32 // A boost may still be lifting the speed until this frame.
 	offroadSince                          uint32 // Start of the current offroad stretch, 0 if not on offroad.
 	offroadType                           uint8  // Lightest offroad in the current stretch.
+	trickNote                             string // Set when a trick wasn't near a trickable surface (trick_check.go).
 }
 
 // checkMovement looks at one RaceData record. It returns a violation, or "" if the movement
@@ -141,6 +142,7 @@ func checkMovement(p *Player, frame uint32, rd *records.RaceData, walls *items.W
 		}
 		if rd.TrickFlip() != m.trickFlip {
 			m.boostUntil = max(m.boostUntil, frame+boostFrames)
+			checkTrickSurface(m, frame, rd.WorldPos())
 		}
 	}
 	m.cannonFlips, m.bulletFlip, m.hasFlags = rd.CannonFlips(), rd.BulletBillFlip(), true
@@ -304,6 +306,11 @@ func trackMovement(a *Aid, pkt *RacePacket, now time.Time) {
 		p.move.stats, p.move.vehicle, p.move.character = room.config.Stats, p.vehicle, p.character
 		p.move.shrunk = p.shrunk(now)
 		problem := checkMovement(p, frame, rd, walls, mega)
+		if note := p.move.trickNote; note != "" {
+			p.move.trickNote = ""
+			logging.Log("Aid %d player %d possible trick-anywhere: %s", a.aid, i, note)
+			recordFlag(a, "possible trick-anywhere: "+note, now)
+		}
 		recordPos(a, i, p, rd, now)
 		trackShrinkSpeed(a, p, now)
 		if note := p.move.shrinkNote; note != "" {

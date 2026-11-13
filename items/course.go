@@ -25,6 +25,8 @@ type Course struct {
 	// Item route segments that end at a DONT_DROP item point: a Bullet Bill can't end on
 	// them (pits, cannons). See item_points.go.
 	NoDropSegments [][2][3]float32
+	// Objects players trick off (trick.go): positions.
+	TrickObjects [][3]float32
 	Walls       *Walls       // Nil if course.kcl couldn't be read.
 	Floors      *Floors      // Nil if course.kcl couldn't be read.
 }
@@ -92,6 +94,9 @@ func parseCourse(szs []byte) (*Course, error) {
 		return nil, err
 	}
 	if c.NoDropSegments, err = kmpNoDropSegments(kmp); err != nil {
+		return nil, err
+	}
+	if c.TrickObjects, err = kmpTrickObjects(kmp); err != nil {
 		return nil, err
 	}
 	if kcl, err := findInU8(arc, "course.kcl"); err == nil {
