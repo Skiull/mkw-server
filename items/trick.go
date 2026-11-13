@@ -41,9 +41,18 @@ func (f *Floors) NearTrickable(pos [3]float32, reach, above, below float32) bool
 	return false
 }
 
-// GOBJ objects with collision players trick off, found from recorded races: Bowser's Castle's
-// bumps (0x1fd, 0x1fe) and Dry Dry Ruins' ramps (0x208).
-var trickObjectIDs = map[uint16]bool{0x1fd: true, 0x1fe: true, 0x208: true}
+// GOBJ objects with collision the game makes trickable (Kinoko's object code calls
+// setCurrentCollisionTrickable for these), by object id:
+var trickObjectIDs = map[uint16]bool{
+	0x1f5: true, // KinokoUd: Mushroom Gorge's up-down mushrooms
+	0x1f6: true, // KinokoBend: Mushroom Gorge's bending mushrooms
+	0x1fa: true, // KinokoNm: Mushroom Gorge's normal mushrooms
+	0x1fd: true, // FlamePole: Bowser's Castle's fire pillar bumps
+	0x1fe: true, // TwistedWay: Bowser's Castle's twisting road
+	0x204: true, // Aurora: Rainbow Road's aurora
+	0x208: true, // DCPillar: Dry Dry Ruins' fallen pillars
+	0x20e: true, // Ami
+}
 
 // How far (horizontally) from a trick object's origin a trick still counts as off it.
 const trickObjectReach = 3500
