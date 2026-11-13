@@ -39,8 +39,13 @@ const (
 	// Average speed that shows a Bullet Bill is flying, and speed below which it has ended.
 	bulletMinSpeed = 130
 	bulletEndSpeed = 122
-	// Longest a Bullet Bill is treated as active after it's used.
-	bulletFrames = 10 * 60
+	// How long a Bullet Bill is treated as active after it's used. Some courses have spots
+	// that extend a bill (it keeps flying until it reaches its end point on the route), so
+	// while it's still at bill speed the window keeps moving forward by bulletExtendFrames,
+	// up to bulletMaxFrames after the use.
+	bulletFrames       = 10 * 60
+	bulletExtendFrames = 2 * 60
+	bulletMaxFrames    = 30 * 60
 	// Cannons launch players far and fast; skip checks for this long after one.
 	cannonFrames = 8 * 60
 	// A single jump this large between two packets, outside a respawn or cannon, is a teleport.
@@ -64,6 +69,7 @@ type moveState struct {
 	bulletFlip     byte
 	exemptUntil    uint32 // Cannon flight: no checks until this frame.
 	bulletUntil    uint32
+	bulletUsedAt   uint32
 	bulletSeen     bool // Bullet Bill speed seen since the last Bullet Bill use.
 	bulletEnded    bool // Back to driving speed since; may still turn out to be a wall bump.
 	hasFlags       bool
@@ -109,6 +115,7 @@ func checkMovement(p *Player, frame uint32, rd *records.RaceData, walls *items.W
 		}
 		if rd.BulletBillFlip() != m.bulletFlip {
 			m.bulletUntil, m.bulletSeen, m.bulletEnded = frame+bulletFrames, false, false
+			m.bulletUsedAt = frame
 		}
 		if rd.StarFlip() != m.starFlip || rd.MegaFlip() != m.megaFlip || rd.BulletBillFlip() != m.bulletFlip {
 			// A Star, Mega or Bullet Bill ends a squish: full speed again.
@@ -207,6 +214,8 @@ func checkMovement(p *Player, frame uint32, rd *records.RaceData, walls *items.W
 			switch {
 			case speed >= bulletMinSpeed:
 				m.bulletSeen, m.bulletEnded, p.bulletEnded = true, false, false
+				// Still flying: an extended bill. Keep the window open a little past now.
+				m.bulletUntil = max(m.bulletUntil, min(frame+bulletExtendFrames, m.bulletUsedAt+bulletMaxFrames))
 			case m.bulletSeen && speed < bulletEndSpeed:
 				m.bulletEnded, p.bulletEnded = true, true
 			}
