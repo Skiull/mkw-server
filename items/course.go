@@ -22,12 +22,17 @@ type Course struct {
 	Hazards     []Hazard     // Objects that destroy items lying on the track (hazards.go).
 	Checkpoints *Checkpoints // Nil for battle arenas (no checkpoints).
 	Respawns    [][3]float32 // JGPT respawn points, by index.
+	// Item route segments that end at a DONT_DROP item point: a Bullet Bill can't end on
+	// them (pits, cannons). See item_points.go.
+	NoDropSegments [][2][3]float32
 	Walls       *Walls       // Nil if course.kcl couldn't be read.
 	Floors      *Floors      // Nil if course.kcl couldn't be read.
 }
 
 // KMP header fields holding section offsets (relative to the end of the header).
 const (
+	kmpITPTOffset = 0x1c
+	kmpITPHOffset = 0x20
 	kmpCKPTOffset = 0x24
 	kmpCKPHOffset = 0x28
 	kmpJGPTOffset = 0x3c
@@ -84,6 +89,9 @@ func parseCourse(szs []byte) (*Course, error) {
 		return nil, err
 	}
 	if c.Checkpoints, err = kmpCheckpoints(kmp); err != nil {
+		return nil, err
+	}
+	if c.NoDropSegments, err = kmpNoDropSegments(kmp); err != nil {
 		return nil, err
 	}
 	if kcl, err := findInU8(arc, "course.kcl"); err == nil {

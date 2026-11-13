@@ -219,6 +219,12 @@ func checkMovement(p *Player, frame uint32, rd *records.RaceData, walls *items.W
 			case m.bulletSeen && speed < bulletEndSpeed:
 				m.bulletEnded, p.bulletEnded = true, true
 			}
+			// Over a pit or in a cannon on the item route (DONT_DROP points), the bill can't
+			// end, so it's still active there whatever the speed says.
+			if m.bulletSeen && m.course != nil && m.course.InNoDropZone(pos) {
+				m.bulletEnded, p.bulletEnded = false, false
+				m.bulletUntil = max(m.bulletUntil, min(frame+bulletExtendFrames, m.bulletUsedAt+bulletMaxFrames))
+			}
 		}
 		// Horizontal speed only (falling adds vertical speed), and not in the air.
 		hspeed := float32(math.Hypot(float64(pos[0]-first.pos[0]), float64(pos[2]-first.pos[2]))) / float32(frame-first.frame)
