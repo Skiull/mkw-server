@@ -57,30 +57,66 @@ var trickObjectIDs = map[uint16]bool{
 // How far (horizontally) from a trick object's origin a trick still counts as off it.
 const trickObjectReach = 3500
 
-func kmpTrickObjects(kmp []byte) ([][3]float32, error) {
+// TrickObject is a trickable object's placement.
+type TrickObject struct {
+	ID   uint16
+	Pos  [3]float32
+	RotY float32 // Degrees.
+}
+
+// Rainbow Road's aurora (wavy road) is a strip from its origin along its local z axis:
+// |x| <= 2000, 0 <= z <= 15000 (Kinoko's ObjectAurora COLLISION_SIZE).
+const (
+	auroraHalfWidth = 2000
+	auroraLength    = 15000
+	auroraMargin    = 1000
+	// Bowser's Castle's twisting road: centered on its origin, |x| <= 4000, |z| <= 7500
+	// (Kinoko's ObjectTwistedWay WIDTH*2 and HALF_DEPTH).
+	twistedHalfWidth = 4000
+	twistedHalfDepth = 7500
+)
+
+func kmpTrickObjects(kmp []byte) ([]TrickObject, error) {
 	data, count, err := kmpSection(kmp, kmpGOBJOffset, "GOBJ", gobjEntryLen)
 	if err != nil {
 		return nil, err
 	}
-	var out [][3]float32
+	var out []TrickObject
 	for i := 0; i < count; i++ {
 		e := data[i*gobjEntryLen:]
-		if !trickObjectIDs[binary.BigEndian.Uint16(e)] {
+		id := binary.BigEndian.Uint16(e)
+		if !trickObjectIDs[id] {
 			continue
 		}
-		var p [3]float32
-		for k := range p {
-			p[k] = math.Float32frombits(binary.BigEndian.Uint32(e[4+k*4:]))
+		o := TrickObject{ID: id, RotY: math.Float32frombits(binary.BigEndian.Uint32(e[0x14:]))}
+		for k := range o.Pos {
+			o.Pos[k] = math.Float32frombits(binary.BigEndian.Uint32(e[4+k*4:]))
 		}
-		out = append(out, p)
+		out = append(out, o)
 	}
 	return out, nil
 }
 
-// NearTrickObject reports whether pos is (horizontally) near an object players trick off.
+// NearTrickObject reports whether pos is (horizontally) on or near an object players trick off.
 func (c *Course) NearTrickObject(pos [3]float32) bool {
 	for _, o := range c.TrickObjects {
-		dx, dz := pos[0]-o[0], pos[2]-o[2]
+		dx, dz := float64(pos[0]-o.Pos[0]), float64(pos[2]-o.Pos[2])
+		// Into the object's frame (rotation about y), for the long wavy roads.
+		r := float64(o.RotY) * math.Pi / 180
+		lx := dx*math.Cos(r) - dz*math.Sin(r)
+		lz := dx*math.Sin(r) + dz*math.Cos(r)
+		switch o.ID {
+		case 0x204:
+			if math.Abs(lx) <= auroraHalfWidth+auroraMargin && lz >= -auroraMargin && lz <= auroraLength+auroraMargin {
+				return true
+			}
+			continue
+		case 0x1fe:
+			if math.Abs(lx) <= twistedHalfWidth+auroraMargin && math.Abs(lz) <= twistedHalfDepth+auroraMargin {
+				return true
+			}
+			// Also counts by distance below (its ends).
+		}
 		if dx*dx+dz*dz <= trickObjectReach*trickObjectReach {
 			return true
 		}

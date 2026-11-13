@@ -26,7 +26,7 @@ type Course struct {
 	// them (pits, cannons). See item_points.go.
 	NoDropSegments [][2][3]float32
 	// Objects players trick off (trick.go): positions.
-	TrickObjects [][3]float32
+	TrickObjects []TrickObject
 	Walls       *Walls       // Nil if course.kcl couldn't be read.
 	Floors      *Floors      // Nil if course.kcl couldn't be read.
 }
