@@ -191,7 +191,14 @@ func checkMovement(p *Player, frame uint32, rd *records.RaceData, walls *items.W
 		}
 	}
 	m.samples = append(m.samples, moveSample{frame, pos})
-	if problem == "" && frame >= m.bulletUntil && !mega {
+	// Boost panels and boost ramps (zippers) boost for a while after them; a trick off a
+	// ramp adds its own boost (TrickFlip, above).
+	if ty, ok := m.floors.At(pos); ok && (ty == items.FloorBoostPanel || ty == items.FloorBoostRamp) {
+		m.boostUntil = max(m.boostUntil, frame+zipperFrames)
+	}
+	// A boosting kart that hits a wall speeds right back up, which looks like a No Wall
+	// Effect slide: only unboosted hits count.
+	if problem == "" && frame >= m.bulletUntil && !mega && frame >= m.boostUntil {
 		problem = checkWallSlide(m, walls)
 	}
 	// A leaf pile's Mushroom may not show as a boost: count a recent pile as one.
@@ -469,6 +476,8 @@ const (
 	wallSlideKick     = 3    // Slides in one race before it's a violation.
 	wallSlideMinGap   = 3    // Frames between samples.
 	wallSlideMaxGap   = 8
+	// How long after a boost panel or boost ramp the boost may still lift the speed.
+	zipperFrames = 150
 )
 
 // checkWallSlide looks at the last three samples for a wall hit that cost no speed. Returns
