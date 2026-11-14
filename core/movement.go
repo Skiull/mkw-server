@@ -102,12 +102,7 @@ type moveState struct {
 	boostUntil                            uint32 // A boost may still be lifting the speed until this frame.
 	offroadSince                          uint32 // Start of the current offroad stretch, 0 if not on offroad.
 	offroadType                           uint8  // Lightest offroad in the current stretch.
-	trickNote                             string
-	// Turn speed check (turn_check.go).
-	turnTop                               float32
-	turnSince                             uint32
-	turnFlagged                           bool
-	turnNote                              string // Set when a trick wasn't near a trickable surface (trick_check.go).
+	trickNote                             string // Set when a trick wasn't near a trickable surface (trick_check.go).
 }
 
 // checkMovement looks at one RaceData record. It returns a violation, or "" if the movement
@@ -203,7 +198,6 @@ func checkMovement(p *Player, frame uint32, rd *records.RaceData, walls *items.W
 	if ty, ok := m.floors.At(pos); ok && (ty == items.FloorBoostPanel || ty == items.FloorBoostRamp) {
 		m.boostUntil = max(m.boostUntil, frame+zipperFrames)
 	}
-	checkTurnSpeed(p, m, frame, rd, pos, mega, time.Now())
 	// A boosting kart that hits a wall speeds right back up, which looks like a No Wall
 	// Effect slide: only unboosted hits count.
 	if problem == "" && frame >= m.bulletUntil && !mega && frame >= m.boostUntil {
@@ -330,11 +324,6 @@ func trackMovement(a *Aid, pkt *RacePacket, now time.Time) {
 				kick(a, KickCheating)
 				return
 			}
-		}
-		if note := p.move.turnNote; note != "" {
-			p.move.turnNote = ""
-			logging.Log("Aid %d player %d possible no-turn-loss: %s", a.aid, i, note)
-			recordFlag(a, "possible no-turn-loss: "+note, now)
 		}
 		recordPos(a, i, p, rd, now)
 		trackShrinkSpeed(a, p, now)
