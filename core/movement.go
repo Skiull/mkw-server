@@ -48,6 +48,8 @@ const (
 	bulletMaxFrames    = 30 * 60
 	// Cannons launch players far and fast; skip checks for this long after one.
 	cannonFrames = 8 * 60
+	// The same, as a time, for checks that work in wall-clock time (hit_check.go).
+	cannonFlight = cannonFrames * time.Second / 60
 	// A single jump this large between two packets, outside a respawn or cannon, is a teleport.
 	// The jump must also be well over what the speed limit allows for the frames in between,
 	// so a lag gap between packets doesn't count.
