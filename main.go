@@ -46,11 +46,31 @@ func main() {
 	recordPackets := flag.Bool("record-packets", false, "Also save each player's race records as sent (<race>.pkt), for in-game replays (requires --record-dir)")
 	replaySpectate := flag.Bool("replay-spectate", false, "With --replay: the bots run the recorded race from when the room opens, for a watcher who joins it in progress")
 	replayFile := flag.String("replay", "", "Packet recording (.pkt) for the room's bots to play back instead of mirroring the live player")
+	aiBots := flag.String("ai-bots", "", "Folder with our Kinoko build (kinoko.exe, Race/, lines/): test bots drive themselves with the AI instead of mirroring a player")
 	recordDir := flag.String("record-dir", "", "Folder to save race recordings in (positions, items, flags per race)")
 	enforceItems := flag.Bool("enforce-items", false, "Drop packets whose items weren't granted by the server (requires --item-slot)")
 	courseDir := flag.String("course-dir", "", "Folder with the game's /Race/Course .szs files (course layouts)")
 
+	buildHumanLines := flag.String("build-human-lines", "", "Recordings folder (--record-dir): improve the AI bots' lines (--ai-bots) with players' runs, then exit")
+	humanLinesCourse := flag.Int("human-lines-course", -1, "With --build-human-lines: only this course")
+	learnLines := flag.Bool("learn-lines", false, "With --ai-bots and --record-packets: rebuild the bots' lines from players' runs after each race")
+	humanLinesQueue := flag.Bool("human-lines-queue", false, "With --build-human-lines: build the courses rooms queued after their races (started by the rooms)")
 	flag.Parse()
+
+	if *buildHumanLines != "" && *humanLinesQueue {
+		if err := core.RunHumanLinesQueue(*buildHumanLines, *aiBots); err != nil {
+			logging.Log("Human lines: %v", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if *buildHumanLines != "" {
+		if err := core.BuildHumanLines(*buildHumanLines, *aiBots, *humanLinesCourse); err != nil {
+			logging.Log("Human lines: %v", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	// Validate required arguments
 	if *roomAddr == "" {
@@ -89,6 +109,8 @@ func main() {
 	}
 
 	config.RecordDir = *recordDir
+	config.AIBotDir = *aiBots
+	config.LearnLines = *learnLines
 	config.RecordRaw = *recordRaw
 	config.RecordPackets = *recordPackets
 	if *replayFile != "" {

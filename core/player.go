@@ -25,6 +25,9 @@ type Player struct {
 	lastItemSeenAt time.Time
 	// The item granted before lastItem: a player can trail it while holding a new one.
 	prevItem common.ItemType
+	// Item last seen trailing or circling that was accepted, and when.
+	trailItem   common.ItemType
+	trailItemAt time.Time
 	// Held and trailing items in the player's latest ITEM record.
 	held     common.ItemType
 	trailing common.ItemType
@@ -61,6 +64,7 @@ func newPlayer(aid byte, isGuest bool) *Player {
 		isGuest:  isGuest,
 		lastItem: common.NoItem,
 		prevItem: common.NoItem,
+		trailItem: common.NoItem,
 		held:     common.NoItem,
 		trailing: common.NoItem,
 	}

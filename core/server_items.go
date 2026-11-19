@@ -88,7 +88,7 @@ func decideItem(engine *items.Engine, a *Aid, p *Player, now time.Time) (common.
 		p.grant = nil
 	}
 
-	req := items.Request{Mode: a.mode, InPlay: itemsInPlay(), Invincible: p.invincible(now)}
+	req := items.Request{Mode: a.mode, InPlay: itemsInPlay(now), Invincible: p.invincible(now), InMega: p.inMega(now)}
 	switch a.mode {
 	case common.ModeVS:
 		if p.rank == 0 {
@@ -167,6 +167,9 @@ func heldMatchesGrant(held, granted common.ItemType) bool {
 	return held == granted || (granted.Uses() > 1 && held.Object() == granted.Object())
 }
 
+// How long after an accepted trailing item was last seen it may still be thrown.
+const trailItemGrace = 5 * time.Second
+
 // How long after the last granted item was last seen it may reappear in the slot.
 const itemReturnWindow = 10 * time.Second
 
@@ -175,6 +178,9 @@ const itemReturnWindow = 10 * time.Second
 func observeItems(a *Aid, pkt *RacePacket, now time.Time) error {
 	for i, st := range pkt.Items {
 		p := a.players[i]
+		if p.held == common.ThunderCloud && st.Held != common.ThunderCloud {
+			cloudUsedAt = now // Now over someone's head until it zaps.
+		}
 		p.held = st.Held
 		p.trailing = st.Trailing
 		expireGrant(p, now)
@@ -212,8 +218,14 @@ func observeItems(a *Aid, pkt *RacePacket, now time.Time) error {
 			p.lastItemSeenAt = now
 		}
 
-		if st.Trailing != common.NoItem && st.Trailing.Object() != p.lastItem.Object() && st.Trailing.Object() != p.prevItem.Object() {
-			return fmt.Errorf("player %d trails %v, last granted %v", i+1, st.Trailing, p.lastItem)
+		if st.Trailing != common.NoItem {
+			// Items keep circling or trailing while more boxes are collected (a triple shell
+			// can outlast two more grants), so one already accepted stays allowed.
+			kept := p.trailItem != common.NoItem && st.Trailing.Object() == p.trailItem.Object()
+			if !kept && st.Trailing.Object() != p.lastItem.Object() && st.Trailing.Object() != p.prevItem.Object() {
+				return fmt.Errorf("player %d trails %v, last granted %v", i+1, st.Trailing, p.lastItem)
+			}
+			p.trailItem, p.trailItemAt = st.Trailing, now
 		}
 	}
 
@@ -248,7 +260,7 @@ func observeItems(a *Aid, pkt *RacePacket, now time.Time) error {
 		if !slot.Action.IsOwnItem() {
 			continue
 		}
-		if !aidMayUseObject(a, slot.Object) {
+		if !aidMayUseObject(a, slot.Object, now) {
 			if leafPileItem(a, slot.Object, now) {
 				continue
 			}
@@ -259,13 +271,19 @@ func observeItems(a *Aid, pkt *RacePacket, now time.Time) error {
 			lightningStruck(a)
 		case common.ObjBlueShell:
 			expectBlueShell(a, now)
+			blueThrownAt = now // Flying until it explodes.
 		}
 	}
 	return nil
 }
 
-func aidMayUseObject(a *Aid, obj common.ItemObject) bool {
+func aidMayUseObject(a *Aid, obj common.ItemObject, now time.Time) bool {
 	for _, p := range a.players {
+		// Throwing the last of an accepted trailing item (the event can come after the
+		// ITEM record already shows it gone).
+		if p.trailItem != common.NoItem && p.trailItem.Object() == obj && now.Sub(p.trailItemAt) < trailItemGrace {
+			return true
+		}
 		if (p.lastItem != common.NoItem && p.lastItem.Object() == obj) || (p.prevItem != common.NoItem && p.prevItem.Object() == obj) {
 			return true
 		}
@@ -276,7 +294,7 @@ func aidMayUseObject(a *Aid, obj common.ItemObject) bool {
 // itemsInPlay counts item objects held, trailed, or granted but not yet shown, across the
 // room. Objects already on the track or flying (a dropped Banana, a Blue Shell on its way)
 // aren't visible to the server and aren't counted. Caller must hold mu.
-func itemsInPlay() map[common.ItemObject]int {
+func itemsInPlay(now time.Time) map[common.ItemObject]int {
 	counts := make(map[common.ItemObject]int)
 	add := func(item common.ItemType) {
 		if item != common.NoItem {
@@ -295,8 +313,26 @@ func itemsInPlay() map[common.ItemObject]int {
 			}
 		}
 	}
+	if !cloudUsedAt.IsZero() && now.Sub(cloudUsedAt) < cloudMaxActive {
+		counts[common.ThunderCloud.Object()]++
+	}
+	if !blueThrownAt.IsZero() && now.Sub(blueThrownAt) < blueShellWait {
+		counts[common.ObjBlueShell]++
+	}
 	return counts
 }
+
+// A used Thunder Cloud floats over a player (passed on by bumping) until it zaps. It counts
+// as in play for cloudMaxActive after its use. Guarded by mu.
+var cloudUsedAt time.Time
+
+const cloudMaxActive = 15 * time.Second
+
+// A thrown Blue Shell flies until it explodes, and like the game, nobody can pull another
+// meanwhile. It counts as in play for blueShellWait after it's thrown. Guarded by mu.
+var blueThrownAt time.Time
+
+const blueShellWait = 25 * time.Second
 
 // racingPlayerCount counts players (guests included) in the race. Caller must hold mu.
 func racingPlayerCount() int {
@@ -330,6 +366,7 @@ func resetItemState(a *Aid) {
 		p.grant = nil
 		p.lastItem = common.NoItem
 		p.prevItem = common.NoItem
+		p.trailItem = common.NoItem
 		p.held = common.NoItem
 		p.trailing = common.NoItem
 		p.hasRequested = false
@@ -379,5 +416,10 @@ const (
 // rules out pulling a Thunder Cloud.
 func (p *Player) invincible(now time.Time) bool {
 	within := func(at time.Time, d time.Duration) bool { return !at.IsZero() && now.Sub(at) <= d }
-	return within(p.starAt, starDuration) || within(p.megaAt, megaItemWindow) || (within(p.bulletAt, bulletDuration) && !p.bulletEnded)
+	return within(p.starAt, starDuration) || p.inMega(now) || (within(p.bulletAt, bulletDuration) && !p.bulletEnded)
+}
+
+// inMega reports whether the player is in a Mega Mushroom (8 s), for the item rules.
+func (p *Player) inMega(now time.Time) bool {
+	return !p.megaAt.IsZero() && now.Sub(p.megaAt) <= megaItemWindow
 }

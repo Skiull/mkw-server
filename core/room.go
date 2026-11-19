@@ -29,6 +29,11 @@ type Config struct {
 	// Kick right away (as cheating) anyone holding or using an item the server never granted.
 	KickItemCheats bool
 
+	// Folder with our Kinoko build (kinoko.exe, Race/, lines/) for AI bots (ai_bots.go).
+	// Empty: bots mirror a real player instead.
+	AIBotDir string
+	// Rebuild the AI bots' lines from players' runs after each recorded race (human_lines.go).
+	LearnLines bool
 	// Folder for race recordings (recorder.go). Empty: off.
 	RecordDir string
 	// Also record raw race-state bytes when they change (diagnostics).
@@ -172,6 +177,9 @@ func handlePacket(addr net.Addr, data []byte, now time.Time) []net.Addr {
 	case isChallengeReply(data):
 		handleChallengeReply(a, data)
 		return nil
+	case isDisconnectReport(data):
+		handleDisconnectReport(a, data)
+		return nil
 	case isDataChangesPacket(data):
 		handleDataChanges(a, data, now)
 		return nil
@@ -266,6 +274,8 @@ func trackPlayerState(a *Aid, pkt *RacePacket, now time.Time) {
 				startRecording(pkt.RaceInfo.Course(), now)
 			}
 			resetItemState(a)
+			cloudUsedAt = time.Time{}
+			blueThrownAt = time.Time{}
 			resetMovement(a)
 			resetHitChecks()
 			resetProgress(a)
