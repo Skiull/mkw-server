@@ -92,6 +92,7 @@ func observeHits(a *Aid, p *Player, rd *records.RaceData, now time.Time) {
 	if p.hitFlagsSeen && actions != p.kartActions && !p.invincible(now) && p.move.lastSpeed >= hitMinSpeed {
 		e := expectHit(a, p, fmt.Sprintf("hit (KartAction bits %#x) without losing speed", actions^p.kartActions), now, hitSlowWait, false)
 		e.needSlow = true
+		e.logOnly = true // Kicked legit players (wall bumps, boosts).
 	}
 	p.kartActions = actions
 	p.hitFlags, p.blueHitFlags, p.hitFlagsSeen = flags, blue, true

@@ -375,7 +375,8 @@ func checkGroundItems(a *Aid, p *Player, prev, pos [3]float32, now time.Time) {
 			}
 			e := expectHit(a, p, fmt.Sprintf("%s a %v dropped by aid %d", what, g.obj, g.owner.aid), now, ramDeadline, false)
 			e.item = g
-			e.logOnly = g.logOnly
+			// Log only: lag and boosts let players pass a Banana on their screen without a hit.
+			e.logOnly = true
 			logging.Log("Aid %d player %d drove through a %v at (%.0f, %.0f, %.0f)", a.aid, playerIndex(a, p), g.obj, g.pos[0], g.pos[1], g.pos[2])
 		}
 	}

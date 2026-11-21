@@ -92,6 +92,7 @@ type moveState struct {
 	lastSquishLog                         time.Time
 	squishSince                           uint32 // Frame a Thwomp squished the player, 0 if never.
 	squishNote                            string // Log-only squish violation for trackMovement.
+	wallNote                              string // Log-only wall pass for trackMovement.
 	comboNote                             string // Combo speed violation for trackMovement.
 	shrunk                                bool   // Certainly small from a Lightning (set per packet).
 	shrinkNote                            string // Log-only shrunk speed violation.
@@ -187,7 +188,8 @@ func checkMovement(p *Player, frame uint32, rd *records.RaceData, walls *items.W
 		} else if frame >= m.bulletUntil {
 			// Bullet Bill follows its own path and can clip scenery, so it's skipped.
 			if tri, hit := walls.Crosses(last.pos, pos); hit {
-				problem = fmt.Sprintf("passed through wall triangle %d between (%.0f, %.0f, %.0f) and (%.0f, %.0f, %.0f)",
+				// Log only: real tricks clip walls (DK Summit bagging), so this isn't proof.
+				m.wallNote = fmt.Sprintf("passed through wall triangle %d between (%.0f, %.0f, %.0f) and (%.0f, %.0f, %.0f)",
 					tri, last.pos[0], last.pos[1], last.pos[2], pos[0], pos[1], pos[2])
 			}
 		}
@@ -348,6 +350,11 @@ func trackMovement(a *Aid, pkt *RacePacket, now time.Time) {
 				logging.Log("Aid %d player %d combo speed check failed (not enforced): %s", a.aid, i, note)
 				recordFlag(a, "combo speed (not enforced): "+note, now)
 			}
+		}
+		if note := p.move.wallNote; note != "" {
+			p.move.wallNote = ""
+			logging.Log("Aid %d player %d wall check failed (not enforced): %s", a.aid, i, note)
+			recordFlag(a, "wall pass (not enforced): "+note, now)
 		}
 		if note := p.move.squishNote; note != "" {
 			p.move.squishNote = ""

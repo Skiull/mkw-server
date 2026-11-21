@@ -20,6 +20,9 @@ type Limits struct {
 	Cooldown map[common.ItemType]time.Duration
 	// Room-wide: an item can't be pulled while this many of its object are in play.
 	MaxInPlay map[common.ItemType]int
+	// Room-wide: after any of these is pulled, none of them can be pulled for SharedCooldown.
+	SharedGroup    map[common.ItemType]bool
+	SharedCooldown time.Duration
 }
 
 var DefaultLimits = Limits{
@@ -34,6 +37,10 @@ var DefaultLimits = Limits{
 		common.Blooper:   15 * time.Second,
 		common.POWBlock:  20 * time.Second,
 	},
+	SharedGroup: map[common.ItemType]bool{
+		common.BlueShell: true, common.Lightning: true, common.Blooper: true, common.POWBlock: true,
+	},
+	SharedCooldown: 10 * time.Second,
 	// Thunder Cloud has no timer: it's available again as soon as the last one is gone.
 	MaxInPlay: map[common.ItemType]int{
 		common.GreenShell:     12,
@@ -61,6 +68,7 @@ type Engine struct {
 	rng         *rand.Rand
 	limits      Limits
 	lastGranted map[common.ItemType]time.Time
+	lastShared  time.Time // Last pull of a SharedGroup item.
 }
 
 // NewEngine makes an engine. limits nil means DefaultLimits.
@@ -210,9 +218,7 @@ func (e *Engine) Decide(req Request, now time.Time) (common.ItemType, error) {
 		}
 	}
 
-	if _, limited := e.limits.Cooldown[item]; limited {
-		e.lastGranted[item] = now
-	}
+	e.noteGranted(item, now)
 	return item, nil
 }
 
@@ -235,7 +241,22 @@ func (e *Engine) Available(item common.ItemType, req Request, now time.Time) boo
 	if limit, ok := e.limits.MaxInPlay[item]; ok && req.InPlay[item.Object()] >= limit {
 		return false
 	}
+	if e.limits.SharedGroup[item] && !e.lastShared.IsZero() && now.Sub(e.lastShared) < e.limits.SharedCooldown {
+		return false
+	}
 	return true
+}
+
+// NoteGranted starts the cooldowns for an item given outside Decide (a special box).
+func (e *Engine) NoteGranted(item common.ItemType, now time.Time) { e.noteGranted(item, now) }
+
+func (e *Engine) noteGranted(item common.ItemType, now time.Time) {
+	if _, limited := e.limits.Cooldown[item]; limited {
+		e.lastGranted[item] = now
+	}
+	if e.limits.SharedGroup[item] {
+		e.lastShared = now
+	}
 }
 
 // SeedForTest replaces the RNG with a deterministic one.

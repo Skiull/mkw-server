@@ -122,6 +122,7 @@ func decideItem(engine *items.Engine, a *Aid, p *Player, now time.Time) (common.
 		if !engine.Available(item, req, now) {
 			item = common.Mushroom
 		}
+		engine.NoteGranted(item, now)
 	} else {
 		var err error
 		if item, err = engine.Decide(req, now); err != nil {
