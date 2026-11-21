@@ -37,10 +37,6 @@ var DefaultLimits = Limits{
 		common.Blooper:   15 * time.Second,
 		common.POWBlock:  20 * time.Second,
 	},
-	SharedGroup: map[common.ItemType]bool{
-		common.BlueShell: true, common.Lightning: true, common.Blooper: true, common.POWBlock: true,
-	},
-	SharedCooldown: 10 * time.Second,
 	// Thunder Cloud has no timer: it's available again as soon as the last one is gone.
 	MaxInPlay: map[common.ItemType]int{
 		common.GreenShell:     12,
