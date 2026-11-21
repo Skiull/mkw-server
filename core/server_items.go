@@ -250,6 +250,9 @@ func observeItems(a *Aid, pkt *RacePacket, now time.Time) error {
 		switch slot.Action {
 		case common.EventUsed:
 			recordItem(a, 0, "used", slot.Object, now)
+			if engine := room.config.ItemEngine; engine != nil {
+				engine.NoteUsed(slot.Object, now)
+			}
 		case common.EventShot:
 			recordItem(a, 0, "threw", slot.Object, now)
 		case common.EventHitFree, common.EventHitDragged:

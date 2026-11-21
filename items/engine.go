@@ -250,6 +250,21 @@ func (e *Engine) Available(item common.ItemType, req Request, now time.Time) boo
 // NoteGranted starts the cooldowns for an item given outside Decide (a special box).
 func (e *Engine) NoteGranted(item common.ItemType, now time.Time) { e.noteGranted(item, now) }
 
+// NoteUsed restarts the cooldowns for a timed item when it's used, like the game: the timer
+// runs from the use, so holding a POW for 18 s doesn't let another come right after.
+func (e *Engine) NoteUsed(obj common.ItemObject, now time.Time) {
+	for item := range e.limits.Cooldown {
+		if item.Object() == obj {
+			e.lastGranted[item] = now
+		}
+	}
+	for item := range e.limits.SharedGroup {
+		if item.Object() == obj {
+			e.lastShared = now
+		}
+	}
+}
+
 func (e *Engine) noteGranted(item common.ItemType, now time.Time) {
 	if _, limited := e.limits.Cooldown[item]; limited {
 		e.lastGranted[item] = now
