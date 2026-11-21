@@ -88,7 +88,7 @@ func decideItem(engine *items.Engine, a *Aid, p *Player, now time.Time) (common.
 		p.grant = nil
 	}
 
-	req := items.Request{Mode: a.mode, InPlay: itemsInPlay(now), Invincible: p.invincible(now), InMega: p.inMega(now)}
+	req := items.Request{Mode: a.mode, InPlay: itemsInPlay(now), Invincible: p.invincible(now), InMega: p.inMega(now), HasTriple: p.hasTriple()}
 	switch a.mode {
 	case common.ModeVS:
 		if p.rank == 0 {
@@ -449,4 +449,16 @@ func (p *Player) invincible(now time.Time) bool {
 // inMega reports whether the player is in a Mega Mushroom (8 s), for the item rules.
 func (p *Player) inMega(now time.Time) bool {
 	return !p.megaAt.IsZero() && now.Sub(p.megaAt) <= megaItemWindow
+}
+
+// hasTriple reports whether the player still holds or trails pieces of a triple Banana,
+// Green Shell or Red Shell (the last one or two trail as single items). Caller must hold mu.
+func (p *Player) hasTriple() bool {
+	triple := func(it common.ItemType) bool {
+		return it == common.TripleBananas || it == common.TripleGreenShells || it == common.TripleRedShells
+	}
+	if triple(p.held) || triple(p.trailing) {
+		return true
+	}
+	return p.trailing != common.NoItem && triple(p.lastItem) && p.trailing.Object() == p.lastItem.Object()
 }

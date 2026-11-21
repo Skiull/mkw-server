@@ -246,3 +246,20 @@ func TestNoThunderCloudWhileInvincible(t *testing.T) {
 		t.Fatal("other items blocked while invincible")
 	}
 }
+
+func TestNoTripleWhileHoldingTriple(t *testing.T) {
+	e := &Engine{limits: Limits{}, lastGranted: map[common.ItemType]time.Time{}}
+	req := Request{Mode: common.ModeVS, HasTriple: true}
+	for _, it := range []common.ItemType{common.TripleBananas, common.TripleGreenShells, common.TripleRedShells} {
+		if e.Available(it, req, time.Now()) {
+			t.Errorf("%v available while the player has a triple", it)
+		}
+	}
+	if !e.Available(common.TripleMushroom, req, time.Now()) || !e.Available(common.Banana, req, time.Now()) {
+		t.Error("Triple Mushroom and single items should stay available")
+	}
+	req.HasTriple = false
+	if !e.Available(common.TripleBananas, req, time.Now()) {
+		t.Error("Triple Bananas blocked with no triple")
+	}
+}

@@ -109,6 +109,14 @@ type Request struct {
 	Invincible bool
 	// The player is in a Mega Mushroom: no second Mega then.
 	InMega bool
+	// The player still holds or trails pieces of a triple Banana/Green/Red: no triple of
+	// those three until they're all gone.
+	HasTriple bool
+}
+
+// tripleBlocked are the triples a player can't pull while still having one (HasTriple).
+func tripleBlocked(item common.ItemType) bool {
+	return item == common.TripleBananas || item == common.TripleGreenShells || item == common.TripleRedShells
 }
 
 func tableFor(mode common.GameMode) (int, error) {
@@ -221,6 +229,9 @@ func (e *Engine) Decide(req Request, now time.Time) (common.ItemType, error) {
 // Available reports whether item can be pulled right now.
 func (e *Engine) Available(item common.ItemType, req Request, now time.Time) bool {
 	if item == common.ThunderCloud && req.Invincible {
+		return false
+	}
+	if req.HasTriple && tripleBlocked(item) {
 		return false
 	}
 	if item == common.MegaMushroom && req.InMega {
